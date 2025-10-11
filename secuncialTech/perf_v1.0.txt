@@ -1,0 +1,139 @@
+=== Collatz Conjecture - Version 1.0 (Baseline) ===
+Sequential implementation with cycle detection
+
+Testing range from 2^71 + offset
+Start: 2361183241434822606848
+End: 2361183241434823606848
+
+Progress: 10000 numbers tested
+Progress: 20000 numbers tested
+Progress: 30000 numbers tested
+Progress: 40000 numbers tested
+Progress: 50000 numbers tested
+Progress: 60000 numbers tested
+Progress: 70000 numbers tested
+Progress: 80000 numbers tested
+Progress: 90000 numbers tested
+Progress: 100000 numbers tested
+Progress: 110000 numbers tested
+Progress: 120000 numbers tested
+Progress: 130000 numbers tested
+Progress: 140000 numbers tested
+Progress: 150000 numbers tested
+Progress: 160000 numbers tested
+Progress: 170000 numbers tested
+Progress: 180000 numbers tested
+Progress: 190000 numbers tested
+Progress: 200000 numbers tested
+Progress: 210000 numbers tested
+Progress: 220000 numbers tested
+Progress: 230000 numbers tested
+Progress: 240000 numbers tested
+Progress: 250000 numbers tested
+Progress: 260000 numbers tested
+Progress: 270000 numbers tested
+Progress: 280000 numbers tested
+Progress: 290000 numbers tested
+Progress: 300000 numbers tested
+Progress: 310000 numbers tested
+Progress: 320000 numbers tested
+Progress: 330000 numbers tested
+Progress: 340000 numbers tested
+Progress: 350000 numbers tested
+Progress: 360000 numbers tested
+Progress: 370000 numbers tested
+Progress: 380000 numbers tested
+Progress: 390000 numbers tested
+Progress: 400000 numbers tested
+Progress: 410000 numbers tested
+Progress: 420000 numbers tested
+Progress: 430000 numbers tested
+Progress: 440000 numbers tested
+Progress: 450000 numbers tested
+Progress: 460000 numbers tested
+Progress: 470000 numbers tested
+Progress: 480000 numbers tested
+Progress: 490000 numbers tested
+Progress: 500000 numbers tested
+Progress: 510000 numbers tested
+Progress: 520000 numbers tested
+Progress: 530000 numbers tested
+Progress: 540000 numbers tested
+Progress: 550000 numbers tested
+Progress: 560000 numbers tested
+Progress: 570000 numbers tested
+Progress: 580000 numbers tested
+Progress: 590000 numbers tested
+Progress: 600000 numbers tested
+Progress: 610000 numbers tested
+Progress: 620000 numbers tested
+Progress: 630000 numbers tested
+Progress: 640000 numbers tested
+Progress: 650000 numbers tested
+Progress: 660000 numbers tested
+Progress: 670000 numbers tested
+Progress: 680000 numbers tested
+Progress: 690000 numbers tested
+Progress: 700000 numbers tested
+Progress: 710000 numbers tested
+Progress: 720000 numbers tested
+Progress: 730000 numbers tested
+Progress: 740000 numbers tested
+Progress: 750000 numbers tested
+Progress: 760000 numbers tested
+Progress: 770000 numbers tested
+Progress: 780000 numbers tested
+Progress: 790000 numbers tested
+Progress: 800000 numbers tested
+Progress: 810000 numbers tested
+Progress: 820000 numbers tested
+Progress: 830000 numbers tested
+Progress: 840000 numbers tested
+Progress: 850000 numbers tested
+Progress: 860000 numbers tested
+Progress: 870000 numbers tested
+Progress: 880000 numbers tested
+Progress: 890000 numbers tested
+Progress: 900000 numbers tested
+Progress: 910000 numbers tested
+Progress: 920000 numbers tested
+Progress: 930000 numbers tested
+Progress: 940000 numbers tested
+Progress: 950000 numbers tested
+Progress: 960000 numbers tested
+Progress: 970000 numbers tested
+Progress: 980000 numbers tested
+Progress: 990000 numbers tested
+Progress: 1000000 numbers tested
+
+=== Results ===
+Numbers tested: 1000000
+Total time: 747 ms
+Average time per number: 0.000747 ms
+Numbers per second: 1338688.09
+
+Maximum steps: 1242
+Number with max steps: 2361183241434822926753
+Average steps: 574.15
+
+ Performance counter stats for './V1.0 0 1000000':
+
+     2,352,494,038      cpu_atom/instructions/           #    0.88  insn per cycle              (2.18%)
+     9,982,724,285      cpu_core/instructions/           #    3.18  insn per cycle              (97.82%)
+     2,671,013,530      cpu_atom/cycles/                                                        (2.18%)
+     3,143,410,470      cpu_core/cycles/                                                        (97.82%)
+           109,892      cpu_atom/cache-misses/                                                  (2.18%)
+            81,825      cpu_core/cache-misses/                                                  (97.82%)
+         7,175,195      cpu_atom/branch-misses/                                                 (2.18%)
+        24,314,320      cpu_core/branch-misses/                                                 (97.82%)
+   <not supported>      cpu_atom/L1-dcache-load-misses/                                       
+           112,265      cpu_core/L1-dcache-load-misses/                                         (97.82%)
+           266,580      cpu_atom/L1-icache-load-misses/                                         (2.18%)
+           330,183      cpu_core/L1-icache-load-misses/                                         (97.82%)
+
+       0.749125287 seconds time elapsed
+
+       0.747788000 seconds user
+       0.000999000 seconds sys
+
+

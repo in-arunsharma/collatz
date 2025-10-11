@@ -1,0 +1,96 @@
+=== Collatz Conjecture - Version 1.2b (Mod-6 Filtered) ===
+CTZ optimization + mod-6 filtering (n ≡ 1,5 mod 6 only)
+
+Testing range from 2^71 + offset
+Start (requested): 2361183241434822606848
+Start (aligned): 2361183241434822606851
+End: 2361183241434823606848
+Max steps safety fuse: 100000000
+Filter: Testing only n ≡ 1,5 (mod 6) - skips evens & multiples of 3
+NOTE: CLI args limited to uint64_t (offset/count < 2^64)
+
+Progress: 10000 numbers tested
+Progress: 20000 numbers tested
+Progress: 30000 numbers tested
+Progress: 40000 numbers tested
+Progress: 50000 numbers tested
+Progress: 60000 numbers tested
+Progress: 70000 numbers tested
+Progress: 80000 numbers tested
+Progress: 90000 numbers tested
+Progress: 100000 numbers tested
+Progress: 110000 numbers tested
+Progress: 120000 numbers tested
+Progress: 130000 numbers tested
+Progress: 140000 numbers tested
+Progress: 150000 numbers tested
+Progress: 160000 numbers tested
+Progress: 170000 numbers tested
+Progress: 180000 numbers tested
+Progress: 190000 numbers tested
+Progress: 200000 numbers tested
+Progress: 210000 numbers tested
+Progress: 220000 numbers tested
+Progress: 230000 numbers tested
+Progress: 240000 numbers tested
+Progress: 250000 numbers tested
+Progress: 260000 numbers tested
+Progress: 270000 numbers tested
+Progress: 280000 numbers tested
+Progress: 290000 numbers tested
+Progress: 300000 numbers tested
+Progress: 310000 numbers tested
+Progress: 320000 numbers tested
+Progress: 330000 numbers tested
+
+=== Results ===
+Numbers tested: 333333
+Total time: 248 ms
+Average time per number: 0.000744 ms
+Numbers per second: 1344084.68
+
+Maximum steps: 1242
+Number with max steps: 2361183241434822926753
+Average steps: 582.58
+
+Maximum excursion: 895198168156114449452054429
+Number with max excursion: 2361183241434823272063
+
+ Performance counter stats for './V1.2b 0 1000000':
+
+            249.54 msec task-clock                       #    0.997 CPUs utilized             
+                 9      context-switches                 #   36.066 /sec                      
+                 8      cpu-migrations                   #   32.059 /sec                      
+               134      page-faults                      #  536.984 /sec                      
+       751,577,697      cpu_atom/cycles/                 #    3.012 GHz                         (0.29%)
+       977,532,207      cpu_core/cycles/                 #    3.917 GHz                         (99.67%)
+       964,576,187      cpu_atom/instructions/           #    1.28  insn per cycle              (0.33%)
+     3,403,142,621      cpu_core/instructions/           #    4.53  insn per cycle              (99.67%)
+       151,401,141      cpu_atom/branches/               #  606.716 M/sec                       (0.33%)
+       533,983,812      cpu_core/branches/               #    2.140 G/sec                       (99.67%)
+           235,410      cpu_atom/branch-misses/          #    0.16% of all branches             (0.33%)
+           449,238      cpu_core/branch-misses/          #    0.30% of all branches             (99.67%)
+             TopdownL1 (cpu_core)                 #     37.0 %  tma_backend_bound      
+                                                  #      1.6 %  tma_bad_speculation    
+                                                  #      4.3 %  tma_frontend_bound     
+                                                  #     57.2 %  tma_retiring             (99.67%)
+             TopdownL1 (cpu_atom)                 #     -1.2 %  tma_bad_speculation    
+                                                  #     41.7 %  tma_retiring             (0.33%)
+                                                  #      8.0 %  tma_backend_bound      
+                                                  #      8.0 %  tma_backend_bound_aux  
+                                                  #     51.5 %  tma_frontend_bound       (0.33%)
+     <not counted>      L1-dcache-loads                                                         (0.00%)
+         7,745,397      L1-dcache-loads                  #   31.038 M/sec                       (99.67%)
+   <not supported>      L1-dcache-load-misses                                                 
+            55,037      L1-dcache-load-misses                                                   (99.67%)
+     <not counted>      LLC-loads                                                               (0.00%)
+            26,173      LLC-loads                        #  104.884 K/sec                       (99.67%)
+     <not counted>      LLC-load-misses                                                         (0.00%)
+             9,136      LLC-load-misses                                                         (99.67%)
+
+       0.250259092 seconds time elapsed
+
+       0.247054000 seconds user
+       0.002988000 seconds sys
+
+
