@@ -1,28 +1,60 @@
-# Current Status: V1.3c 🏆 (CORRECTED & VALIDATED)
+# Current Status: V1.3d � (FINAL SEQUENTIAL)
 
-**Latest Version:** V1.3c - Precomputed read-only memo with CTZ bundling + Critical Bug Fixes
+**Latest Version:** V1.3d - Final sequential micro-optimizations before parallelization
 
-**Performance:** 1,975,109 nums/sec (168ms for 333K numbers) - **VALIDATED CORRECT!**
+**Performance:** 2,188,264 nums/sec (152ms for 333K numbers) - **READY FOR OPENMP!**
 
-**CRITICAL UPDATE (Oct 12, 2025):**
-- ⚠️ **Two critical correctness bugs discovered** in friend's code review
-- ✅ **Both bugs fixed** (128-bit truncation + incorrect backfill)
-- ✅ **Validation passed** - all known values correct
-- ✅ **7.7% slower** but 100% correct (correctness >>> speed)
-- ✅ Ready for parallelization with confidence
+**Micro-Optimizations Applied (Oct 12, 2025):**
+- ✅ `__attribute__((always_inline))` on hot kernel
+- ✅ `__restrict` pointer for memo aliasing hints
+- ✅ Hoisted low-limb extraction for faster parity checks
+- ✅ Enhanced compile flags: `-flto -fno-asynchronous-unwind-tables -DNDEBUG`
+- ✅ Optional `--progress` flag (off by default for clean benchmarking)
 
-**See:** [CRITICAL_BUGFIXES.md](CRITICAL_BUGFIXES.md) for detailed analysis
+**Performance Gain:** +4.8% vs V1.3c, **1.79× vs V1.0 baseline**
 
-**Breakthrough:**
-- ✅ V1.3c is **1.62× FASTER** than V1.0 baseline (1.98M vs 1.22M nums/sec)
-- ✅ Thread-safe and ready for OpenMP/CUDA
-- ✅ Correctness validated with self-test
+**Sequential Journey Complete:**
+- V1.0 → V1.3d: **79% speedup**
+- Ready for horizontal scaling (OpenMP → CUDA → MPI)
 
-**Note:** V1.3b (4-lane ILP) tested but slower (1.47M nums/sec)
+**See:** [perf_v1.3d_analysis.md](../secuncialTech/perf_v1.3d_analysis.md) for benchmark details
 
 ---
 
 ## Version History
+
+### V1.3d - Final Sequential Optimizations 🎯 (CURRENT BEST)
+- **Technique:** Compiler hints (always_inline, restrict), LTO, cleaner code size
+- **Optimization:** Extract last sequential gains before parallelization
+- **Numbers tested:** 333,333 (1/3 of 1M range, mod-6 filtered)
+- **Time:** 152ms (average of 3 runs)
+- **Throughput:** 2,188,264 nums/sec (**+4.8% vs V1.3c**)
+- **Instructions:** (not measured - perf disabled)
+- **Key wins:**
+  - Always-inline: Forces inlining for better LICM/if-conversion
+  - Restrict: Aliasing hints for aggressive loop optimization
+  - LTO: Whole-program analysis finds additional opportunities
+  - No unwind tables: Smaller code → better I-cache
+  - Optional progress: Eliminate syscall overhead in benchmarks
+- **Engineering:** Clean benchmarking, production-ready
+- **Status:** ✅ **FINAL SEQUENTIAL VERSION - Ready for OpenMP!**
+
+### V1.3c - Precomputed Read-Only Memo Table 🏆 (CORRECTED)
+- **Technique:** Precomputed read-only memo with CTZ bundling + Critical Bug Fixes
+- **Optimization:** Thread-safe memo access, validated correctness
+- **Numbers tested:** 333,333 (1/3 of 1M range, mod-6 filtered)
+- **Time:** 168ms
+- **Throughput:** 1,975,109 nums/sec (average of 3 runs: 2.09M)
+- **Instructions:** 3.07B (core)
+- **IPC:** 4.52 (core)
+- **Branch miss:** 0.82%
+- **Key wins:**
+  - Fixed 128-bit truncation bug (precompute correctness)
+  - Fixed backfill logic bug (completed flag)
+  - Validation self-test passes
+  - Thread-safe for parallelization
+- **Engineering:** Default 2^20 (4MB), optional disk save/load
+- **Status:** ✅ Validated baseline for V1.3d and V1.4
 
 ### V1.3a - Smarter Memo Engineering (CURRENT BEST SEQUENTIAL)
 - **Technique:** Path-compression fill, uint32_t sentinel, prefaulting
