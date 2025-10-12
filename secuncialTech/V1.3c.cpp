@@ -23,7 +23,6 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
-#include <sys/stat.h>
 
 // ----- Basic 128-bit utilities -----
 typedef __uint128_t uint128_t;
@@ -165,7 +164,7 @@ static void precompute_small_table() {
     
     fprintf(stderr, "[PRECOMPUTE] Filled %llu / %llu entries (%.2f%%)\n", 
             (unsigned long long)filled, (unsigned long long)small_limit, 
-            100.0 * filled / small_limit);
+            100.0 * (double)filled / (double)small_limit);
 }
 
 // ----- Unit self-test: Verify memo table correctness -----
@@ -240,7 +239,8 @@ static bool save_table_to_disk(const char* filename) {
     }
     
     fclose(f);
-    fprintf(stderr, "[SAVE] Wrote %lu entries to %s\n", small_limit, filename);
+    fprintf(stderr, "[SAVE] Wrote %llu entries to %s\n", 
+            (unsigned long long)small_limit, filename);
     return true;
 }
 
@@ -276,7 +276,8 @@ static bool load_table_from_disk(const char* filename) {
     }
     
     fclose(f);
-    fprintf(stderr, "[LOAD] Loaded %lu entries from %s\n", small_limit, filename);
+    fprintf(stderr, "[LOAD] Loaded %llu entries from %s\n", 
+            (unsigned long long)small_limit, filename);
     return true;
 }
 
@@ -295,7 +296,14 @@ static CollatzResult compute_collatz_readonly(uint128_t n, uint64_t max_steps = 
         if (current < small_limit) {
             uint32_t cached = memo[(uint64_t)current];
             if (cached != UNKNOWN) {
-                res.steps = steps + cached;
+                uint64_t total = steps + cached;
+                // Honor safety fuse even on cache hit
+                if (total >= max_steps) {
+                    res.overflow = true;
+                    res.steps = total;
+                    return res;
+                }
+                res.steps = total;
                 return res;
             }
         }
@@ -341,6 +349,7 @@ static inline uint32_t mod3_u128(uint128_t n) {
     uint64_t hi = (uint64_t)(n >> 64);
     uint32_t r_lo = lo % 3;
     uint32_t r_hi = hi % 3;
+    // Note: 2^64 ≡ 1 (mod 3), so (lo%3 + hi%3) % 3 is correct
     return (r_lo + r_hi) % 3;
 }
 
@@ -361,11 +370,14 @@ static inline void align_start_and_delta(uint128_t &n, uint64_t &delta) {
 // ----- Main driver -----
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <start_offset> <count> [--small-limit BITS] [--save FILE] [--load FILE]\n";
-        std::cerr << "  Tests numbers 2^71 + start_offset, +4, +6, +4, +6, ... (mod-6 pattern)\n";
-        std::cerr << "  --small-limit BITS: Set memo table size to 2^BITS (default 20 = 1M entries)\n";
-        std::cerr << "  --save FILE: Save precomputed table to disk\n";
-        std::cerr << "  --load FILE: Load precomputed table from disk (if exists)\n";
+        std::cerr << "Usage: " << argv[0] << " <start_offset> <count> [OPTIONS]\n";
+        std::cerr << "  Scans range [2^71 + start_offset, 2^71 + start_offset + count)\n";
+        std::cerr << "  with mod-6 filter (tests only n ≡ 1,5 mod 6)\n";
+        std::cerr << "\nOPTIONS:\n";
+        std::cerr << "  --small-limit BITS  Set memo table size to 2^BITS (default 20 = 1M entries)\n";
+        std::cerr << "  --save FILE         Save precomputed table to disk\n";
+        std::cerr << "  --load FILE         Load precomputed table from disk (if exists)\n";
+        std::cerr << "  --max-steps N       Override safety fuse (default 100000)\n";
         return 1;
     }
     
@@ -374,6 +386,7 @@ int main(int argc, char** argv) {
     
     const char* save_file = nullptr;
     const char* load_file = nullptr;
+    uint64_t max_steps = SAFETY_FUSE;  // Allow override via CLI
     
     // Parse optional arguments
     for (int i = 3; i < argc; i++) {
@@ -383,6 +396,8 @@ int main(int argc, char** argv) {
             save_file = argv[++i];
         } else if (strcmp(argv[i], "--load") == 0 && i + 1 < argc) {
             load_file = argv[++i];
+        } else if (strcmp(argv[i], "--max-steps") == 0 && i + 1 < argc) {
+            max_steps = std::stoull(argv[++i]);
         }
     }
     
@@ -440,7 +455,7 @@ int main(int argc, char** argv) {
         prefault_sum += memo[i];
     }
     if (prefault_sum == 0xDEADBEEF) {  // Never true, just prevent optimization
-        fprintf(stderr, "prefault=%lu\n", prefault_sum);
+        fprintf(stderr, "prefault=%llu\n", (unsigned long long)prefault_sum);
     }
     
     // Base number: 2^71
@@ -469,8 +484,12 @@ int main(int argc, char** argv) {
     
     uint128_t n = start;
     
+    // Use read-only pointer to communicate intent to compiler
+    const uint32_t* memo_ptr = memo.data();
+    (void)memo_ptr;  // Suppress unused warning (used conceptually for aliasing hints)
+    
     for (; n < end; ) {
-        CollatzResult res = compute_collatz_readonly(n);
+        CollatzResult res = compute_collatz_readonly(n, max_steps);
         
         tested++;
         total_steps += res.steps;
@@ -495,7 +514,7 @@ int main(int argc, char** argv) {
         
         // Progress report (power-of-2 for efficiency)
         if ((tested & ((1 << 14) - 1)) == 0 && tested > 0) {
-            fprintf(stderr, "[PROGRESS] Tested %lu numbers\n", tested);
+            fprintf(stderr, "[PROGRESS] Tested %llu numbers\n", (unsigned long long)tested);
         }
     }
     
