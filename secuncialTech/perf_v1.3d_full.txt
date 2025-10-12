@@ -1,0 +1,53 @@
+[CONFIG] Memo table size: 2^20 = 1048576 entries (4.00 MB)
+[PRECOMPUTE] Filling 2^20 table entries with path compression...
+[PRECOMPUTE] Filled 1048576 / 1048576 entries (100.00%)
+[VALIDATE] Self-test passed (known values correct)
+[RUN] Scanning range [, ) with mod-6 filter (stride 2↔4)
+[MEMO] Table is now READ-ONLY (thread-safe)
+23611832414348226068512361183241434823606848
+=== V1.3d Results (Final Sequential Optimizations) ===
+Tested:       333333 numbers
+Time:         136 ms
+Throughput:   2438443 nums/sec
+Avg steps:    582.451
+Max steps:    1242 at n=2361183241434822926753
+Peak value:   306597216805399172739175504
+
+ Performance counter stats for './V1.3d 0 1000000':
+
+            179.48 msec task-clock                       #    0.995 CPUs utilized             
+                 4      context-switches                 #   22.287 /sec                      
+                 3      cpu-migrations                   #   16.715 /sec                      
+             1,158      page-faults                      #    6.452 K/sec                     
+       416,402,089      cpu_atom/cycles/                 #    2.320 GHz                         (0.05%)
+       814,110,668      cpu_core/cycles/                 #    4.536 GHz                         (99.95%)
+       659,841,608      cpu_atom/instructions/           #    1.58  insn per cycle              (0.05%)
+     2,905,393,339      cpu_core/instructions/           #    6.98  insn per cycle              (99.95%)
+       134,783,639      cpu_atom/branches/               #  750.978 M/sec                       (0.05%)
+       452,183,755      cpu_core/branches/               #    2.519 G/sec                       (99.95%)
+         1,017,318      cpu_atom/branch-misses/          #    0.75% of all branches             (0.05%)
+           952,745      cpu_core/branch-misses/          #    0.71% of all branches             (99.95%)
+             TopdownL1 (cpu_core)                 #     31.0 %  tma_backend_bound      
+                                                  #      3.6 %  tma_bad_speculation    
+                                                  #      6.2 %  tma_frontend_bound     
+                                                  #     59.2 %  tma_retiring             (99.95%)
+             TopdownL1 (cpu_atom)                 #     43.9 %  tma_bad_speculation    
+                                                  #     34.8 %  tma_retiring             (0.05%)
+                                                  #      0.0 %  tma_backend_bound      
+                                                  #      0.0 %  tma_backend_bound_aux  
+                                                  #     21.3 %  tma_frontend_bound       (0.05%)
+     <not counted>      L1-dcache-loads                                                         (0.00%)
+       246,117,328      L1-dcache-loads                  #    1.371 G/sec                       (99.95%)
+   <not supported>      L1-dcache-load-misses                                                 
+           586,296      L1-dcache-load-misses                                                   (99.95%)
+     <not counted>      LLC-loads                                                               (0.00%)
+           155,523      LLC-loads                        #  866.532 K/sec                       (99.95%)
+     <not counted>      LLC-load-misses                                                         (0.00%)
+            77,474      LLC-load-misses                                                         (99.95%)
+
+       0.180377813 seconds time elapsed
+
+       0.179192000 seconds user
+       0.001001000 seconds sys
+
+
