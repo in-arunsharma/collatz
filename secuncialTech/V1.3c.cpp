@@ -469,7 +469,8 @@ int main(int argc, char** argv) {
     print_u128(start);
     fprintf(stderr, ", ");
     print_u128(end);
-    fprintf(stderr, ") with mod-6 filter (stride %lu↔%lu)\n", delta, delta^6);
+    fprintf(stderr, ") with mod-6 filter (stride %llu↔%llu)\n",
+            (unsigned long long)delta, (unsigned long long)(delta ^ 6));
     fprintf(stderr, "[MEMO] Table is now READ-ONLY (thread-safe)\n");
     
     // Timing and computation
