@@ -23,6 +23,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <string>  // for std::stoull, std::stoul
 
 // ----- Basic 128-bit utilities -----
 typedef __uint128_t uint128_t;
