@@ -1,0 +1,213 @@
+╔═══════════════════════════════════════════════════════════════════════╗
+║                  MARENOSTRUM 5 DEPLOYMENT CHEAT SHEET                 ║
+║                   Collatz V1.5-openmp Quick Reference                 ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🚀 QUICK START (Copy-Paste Ready)                                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+## 1. Deploy to MareNostrum (5 min)
+cd /home/aruns/Desktop/MN25
+scp -r MNv3/ nct01225@glogin1.bsc.es:/gpfs/projects/nct_352/nct01225/collatz/
+
+## 2. SSH and Build (5 min)
+ssh nct01225@glogin1.bsc.es
+cd /gpfs/projects/nct_352/nct01225/collatz/MNv3
+module load intel/2023.2.0  # Optional but recommended
+bash build_openmp.sh
+
+## 3. Test on Login Node (1 min)
+./V1.5-openmp 0 1000000 --threads 4 --tag login_test
+
+## 4. Submit Job (1 sec)
+sbatch slurm_openmp_1node.slurm
+
+## 5. Monitor (watch until done)
+squeue -u nct01225                      # Check queue
+watch tail -30 collatz_omp_*.out        # Watch output
+cat collatz_omp_*.out                   # View results
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📊 EXPECTED RESULTS                                                  │
+└─────────────────────────────────────────────────────────────────────┘
+
+Baseline:      2.2M nums/sec (V1.4b sequential)
+Target:        150M nums/sec (70× speedup)
+Optimistic:    200M nums/sec (90× speedup)
+Minimum:       100M nums/sec (45× speedup)
+
+Job duration:  ~1 minute (100M numbers)
+Queue wait:    <5 minutes (debug queue)
+Total time:    ~30 minutes (deploy to results)
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🎯 DECISION TREE                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+Result >150M nums/sec → ✅ EXCELLENT
+  → Proceed to Phase 2 (MPI) for 1.5B nums/sec
+  → OR jump to Phase 3 (GPU) for 300M+ nums/sec
+
+Result 100-150M nums/sec → ⚠️ ACCEPTABLE
+  → Proceed to Phase 2 (MPI) - still good scaling
+  → OR optimize Phase 1 first
+
+Result <100M nums/sec → ❌ DEBUG NEEDED
+  → Check thread binding (OMP_PROC_BIND)
+  → Check NUMA (numactl --hardware)
+  → Profile with perf
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🐛 TROUBLESHOOTING                                                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+## Job won't start
+squeue -u nct01225                           # Check queue
+scontrol show job <JOBID>                    # Job details
+# Edit slurm file: change --qos=gp_bsccs
+
+## Low performance
+export OMP_PROC_BIND=close                   # Thread pinning
+export OMP_PLACES=cores                      # Core placement
+./V1.5-openmp 0 1000000 --threads 56         # Try 56 cores first
+
+## Build errors
+module load intel/2023.2.0                   # Intel compiler
+g++ --version                                # Check GCC version (need 9.0+)
+# Edit build_openmp.sh: use CXX=g++
+
+## Validate results
+diff <(./V1.4b 0 100000 --tag verify | grep "Tested") \
+     <(./V1.5-openmp 0 100000 --threads 1 --tag verify | grep "Tested")
+# Should match (single-threaded should equal sequential)
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📁 FILE REFERENCE                                                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+V1.5-openmp.cpp              Source code
+build_openmp.sh              Build script
+slurm_openmp_1node.slurm     Job submission script
+test_local.sh                Local test script
+README.md                    Quick reference
+DEPLOYMENT_GUIDE.md          Detailed guide
+STRATEGY.md                  Full strategy document
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🔧 USEFUL COMMANDS                                                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+## Check resources
+sinfo -p gp_bsccs                           # Partition info
+squeue -p gp_bsccs                          # Queue status
+sacctmgr show assoc user=nct01225           # Account info
+
+## Job management
+sbatch <script>                             # Submit job
+scancel <JOBID>                             # Cancel job
+scontrol show job <JOBID>                   # Job details
+sacct -j <JOBID> --format=JobID,Elapsed,State,MaxRSS
+
+## Performance
+lscpu                                       # CPU info
+numactl --hardware                          # NUMA topology
+free -h                                     # Memory info
+
+## Modules
+module avail                                # Available modules
+module load intel/2023.2.0                  # Load Intel
+module list                                 # Loaded modules
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📊 SLURM JOB PARAMETERS                                              │
+└─────────────────────────────────────────────────────────────────────┘
+
+--nodes=1                       # Number of nodes
+--ntasks=1                      # MPI tasks (1 for OpenMP only)
+--cpus-per-task=112             # Cores per task (112 = full node)
+--time=02:00:00                 # Wall time limit
+--qos=gp_debug                  # Queue (fast turnaround)
+--account=nct_352               # Your account
+--partition=gp_bsccs            # Partition (GPP nodes)
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🎯 PHASE 2 PREVIEW (MPI Multi-Node)                                 │
+└─────────────────────────────────────────────────────────────────────┘
+
+After Phase 1 success, create Phase 2:
+- MPI wrapper around V1.5-openmp
+- Each node gets independent range
+- No inter-node communication needed
+- 10 nodes × 150M = 1.5B nums/sec
+
+Key changes:
+- MPI_Init(), MPI_Finalize()
+- Split range by MPI rank: offset += rank * local_count
+- Aggregate results at end (MPI_Reduce)
+
+Estimated time: 1-2 hours development
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 💡 TIPS & TRICKS                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+
+1. Test locally FIRST (./test_local.sh)
+2. Use debug queue for fast turnaround (--qos=gp_debug)
+3. Start small: 4 threads → 56 threads → 112 threads
+4. Validate: Compare 1-thread OpenMP vs sequential
+5. Profile: Use perf stat -d to find bottlenecks
+6. NUMA: Pin threads to avoid cross-socket traffic
+7. Chunk size: 512 is good, try 256 or 1024 if needed
+8. Monitor: watch tail -30 instead of cat (live updates)
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 📞 HELP & DOCUMENTATION                                              │
+└─────────────────────────────────────────────────────────────────────┘
+
+MareNostrum 5 Docs:  https://www.bsc.es/user-support/mn5.php
+User Portal:         https://userportal.bsc.es
+SLURM Docs:          https://slurm.schedmd.com
+OpenMP Docs:         https://www.openmp.org
+Support Email:       support@bsc.es
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ ✅ CHECKLIST                                                         │
+└─────────────────────────────────────────────────────────────────────┘
+
+Before deployment:
+[ ] MNv3/ folder ready
+[ ] Local test passed (./test_local.sh)
+[ ] MareNostrum account credentials ready
+
+After deployment:
+[ ] Files copied to MareNostrum
+[ ] Build successful
+[ ] Login node test passed
+[ ] Job submitted
+[ ] Job completed successfully
+
+Success criteria:
+[ ] Throughput >100M nums/sec
+[ ] No crashes or errors
+[ ] Edge cases logged correctly
+[ ] Results validate against V1.4b
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ 🚀 READY TO GO!                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+Your next command:
+  cd /home/aruns/Desktop/MN25
+  scp -r MNv3/ nct01225@glogin1.bsc.es:/gpfs/projects/nct_352/nct01225/collatz/
+
+Expected timeline:
+  T+0:00   Deploy (5 min)
+  T+0:05   Build (5 min)
+  T+0:10   Submit job (1 min)
+  T+0:15   Job starts (5 min queue wait)
+  T+0:16   Job completes (1 min runtime)
+  T+0:20   Analyze results (5 min)
+  T+0:30   Decide next phase
+
+Good luck! 🍀
