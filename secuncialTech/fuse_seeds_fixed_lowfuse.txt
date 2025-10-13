@@ -1,0 +1,4 @@
+# Fuse-hit seeds (exceeded max_steps) - reprocessed with extended fuse
+# Format: seed_decimal steps_reached
+# Fuse-hit seeds (exceeded max_steps) - reprocessed with extended fuse
+# Format: seed_decimal steps_reached

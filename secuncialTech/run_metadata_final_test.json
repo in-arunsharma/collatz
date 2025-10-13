@@ -1,0 +1,47 @@
+{
+  "version": "V1.4b",
+  "timestamp": 1760314943,
+  "run_tag": "final_test",
+  "git_commit": "16bfee0",
+  "compile_flags": "-O3 -march=native -flto -fno-exceptions -fno-rtti -funroll-loops -fno-asynchronous-unwind-tables -DNDEBUG",
+  "input": {
+    "base": "2^71",
+    "start_offset": 0,
+    "count": 100000,
+    "stride_policy": "mod-6 (test n≡1,5 mod 6)"
+  },
+  "configuration": {
+    "memo_bits": 20,
+    "memo_size": 1048576,
+    "memo_checksum": "0xa20fef13558ed9fe",
+    "hot_fuse": 100000,
+    "cold_fuse": 1000000,
+    "batch_size": 10000
+  },
+  "results": {
+    "tested": 33333,
+    "time_ms": 13,
+    "throughput_per_sec": 2382820,
+    "max_steps": 1038,
+    "max_steps_seed": "2361183241434822634489",
+    "max_peak": "22972735606139283433927120"
+  },
+  "cold_queues": {
+    "note": "cycle_length reported in bundled-iterations (CTZ-collapsed), not raw Collatz steps",
+    "queue1_fuse_triggers": 0,
+    "queue1_genuine_cycles": 0,
+    "queue1_verified_ok": 0,
+    "queue2_overflow_triggers": 0,
+    "queue2_genuine_cycles": 0,
+    "queue2_256bit_overflow": 0,
+    "queue2_verified_ok": 0,
+    "total_cold_processing_ms": 0
+  },
+  "verification": {
+    "overflow_log": "overflow_seeds_final_test.txt",
+    "fuse_log": "fuse_seeds_final_test.txt",
+    "cycle_log": "cycle_seeds_final_test.txt",
+    "256bit_overflow_log": "256bit_overflow_final_test.txt",
+    "status": "ALL_VERIFIED"
+  }
+}

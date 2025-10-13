@@ -1,0 +1,4 @@
+# Overflow seeds (exceeded 128-bit) - reprocessed with 256-bit
+# Format: seed_decimal steps_before_overflow peak_value
+# Overflow seeds (exceeded 128-bit) - reprocessed with 256-bit
+# Format: seed_decimal steps_before_overflow peak_value

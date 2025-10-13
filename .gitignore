@@ -1,0 +1,32 @@
+# Build outputs
+*.o
+*.a
+*.so
+*.out
+V1.3d
+V1.4b-openmp
+V1.5-cuda-hybrid
+
+# Performance profiling data
+perf.data
+perf.data.old
+*.perf
+
+# Test output files (keep structure but ignore large test outputs)
+parallel/output/*.txt
+secuncialTech/*_test*.txt
+secuncialTech/perf_*.txt
+secuncialTech/output_*.txt
+
+# Keep JSON metadata (small and valuable)
+# !*.json
+
+# Editor/IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

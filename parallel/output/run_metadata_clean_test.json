@@ -1,0 +1,48 @@
+{
+  "version": "V1.4b-openmp",
+  "timestamp": 1760317039,
+  "run_tag": "clean_test",
+  "threads": 14,
+  "git_commit": "895693090",
+  "compile_flags": "-O3 -march=native -flto -fno-exceptions -fno-rtti -funroll-loops -fno-asynchronous-unwind-tables -DNDEBUG",
+  "input": {
+    "base": "2^71",
+    "start_offset": 0,
+    "count": 10000000,
+    "stride_policy": "mod-6 (test n≡1,5 mod 6)"
+  },
+  "configuration": {
+    "memo_bits": 20,
+    "memo_size": 1048576,
+    "memo_checksum": "0xa20fef13558ed9fe",
+    "hot_fuse": 100000,
+    "cold_fuse": 1000000
+  },
+  "results": {
+    "tested": 6666664,
+    "time_ms": 471,
+    "throughput_per_sec": 14131521,
+    "max_steps": 1294,
+    "max_steps_seed": "2361183241434826780925",
+    "max_peak": "44149999219977692478219025012"
+  },
+  "cold_queues": {
+    "note": "cycle_length reported in bundled-iterations (CTZ-collapsed), not raw Collatz steps",
+    "queue1_fuse_triggers": 0,
+    "queue1_genuine_cycles": 0,
+    "queue1_verified_ok": 0,
+    "queue1_timeouts": 0,
+    "queue2_overflow_triggers": 0,
+    "queue2_genuine_cycles": 0,
+    "queue2_256bit_overflow": 0,
+    "queue2_verified_ok": 0,
+    "total_cold_processing_ms": 0
+  },
+  "verification": {
+    "overflow_log_pattern": "overflow_seeds_clean_test_t*.txt",
+    "fuse_log_pattern": "fuse_seeds_clean_test_t*.txt",
+    "cycle_log_pattern": "cycle_seeds_clean_test_t*.txt",
+    "256bit_overflow_log_pattern": "256bit_overflow_clean_test_t*.txt",
+    "status": "ALL_VERIFIED"
+  }
+}

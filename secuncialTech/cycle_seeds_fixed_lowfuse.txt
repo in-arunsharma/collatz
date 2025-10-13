@@ -1,0 +1,6 @@
+# GENUINE CYCLES FOUND (Collatz conjecture violation!)
+# Format: seed_decimal cycle_length cycle_start_value
+# NOTE: cycle_length is in bundled-iterations (CTZ-collapsed steps), not raw Collatz steps
+# GENUINE CYCLES FOUND (Collatz conjecture violation!)
+# Format: seed_decimal cycle_length cycle_start_value
+# NOTE: cycle_length is in bundled-iterations (CTZ-collapsed steps), not raw Collatz steps

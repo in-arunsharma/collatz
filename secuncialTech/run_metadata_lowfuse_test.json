@@ -1,0 +1,46 @@
+{
+  "version": "V1.4b",
+  "timestamp": 1760313375,
+  "run_tag": "lowfuse_test",
+  "git_commit": "16bfee0",
+  "compile_flags": "-O3 -march=native -flto -fno-exceptions -fno-rtti -funroll-loops -fno-asynchronous-unwind-tables -DNDEBUG",
+  "input": {
+    "base": "2^71",
+    "start_offset": 0,
+    "count": 50000,
+    "stride_policy": "mod-6 (test n≡1,5 mod 6)"
+  },
+  "configuration": {
+    "memo_bits": 20,
+    "memo_size": 1048576,
+    "memo_checksum": "0xa20fef13558ed9fe",
+    "hot_fuse": 500,
+    "cold_fuse": 1000000,
+    "batch_size": 10000
+  },
+  "results": {
+    "tested": 16666,
+    "time_ms": 18,
+    "throughput_per_sec": 880056,
+    "max_steps": 627,
+    "max_steps_seed": "2361183241434822607285",
+    "max_peak": "19647696420435977051588512"
+  },
+  "cold_queues": {
+    "queue1_fuse_triggers": 12920,
+    "queue1_genuine_cycles": 0,
+    "queue1_verified_ok": 12920,
+    "queue2_overflow_triggers": 0,
+    "queue2_genuine_cycles": 0,
+    "queue2_256bit_overflow": 0,
+    "queue2_verified_ok": 0,
+    "total_cold_processing_ms": 10
+  },
+  "verification": {
+    "overflow_log": "overflow_seeds_lowfuse_test.txt",
+    "fuse_log": "fuse_seeds_lowfuse_test.txt",
+    "cycle_log": "cycle_seeds_lowfuse_test.txt",
+    "256bit_overflow_log": "256bit_overflow_lowfuse_test.txt",
+    "status": "ALL_VERIFIED"
+  }
+}
