@@ -1,9 +1,11 @@
 # Phase 1 - Quick Start Summary
 
 ## 🎯 Goal
-Deploy proven V1.4b-openmp code on **5 MareNostrum GPP nodes** using MPI for multi-node scaling.
+Deploy proven V1.4b-openmp code on **3 MareNostrum GPP nodes** using MPI for multi-node scaling.
 
-**Expected Performance:** 1.25B numbers/sec (5 nodes × 250M/sec)
+**Resource Pool:** 150 GPP nodes + 25 ACC nodes (shared among all hackathon participants)  
+**Initial Allocation:** 3 GPP nodes (conservative, can scale up if available)  
+**Expected Performance:** 750M numbers/sec (3 nodes × 250M/sec)
 
 ---
 
@@ -71,9 +73,12 @@ Ready for MareNostrum deployment!
 ### 3. Deploy to MareNostrum (~15 minutes)
 
 ```bash
-# From your local machine
+### **Step 4: Package for MareNostrum** (30 sec)
+```bash
+# Everything is in marenostrum/ folder now!
 cd ~/Desktop/MN25
-tar czf collatz_mn5.tar.gz marenostrum/ parallel/V1.4b-openmp.cpp
+tar czf collatz_mn5.tar.gz marenostrum/
+```
 scp collatz_mn5.tar.gz <username>@mn5.bsc.es:~/
 
 # SSH to MareNostrum

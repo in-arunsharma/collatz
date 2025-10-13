@@ -1,16 +1,18 @@
 #!/bin/bash
 #SBATCH --job-name=collatz_phase1_gpp
 #SBATCH --partition=gpp
-#SBATCH --nodes=5
-#SBATCH --ntasks=5
+#SBATCH --nodes=3
+#SBATCH --ntasks=3
 #SBATCH --cpus-per-task=112
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=collatz_phase1_%j.out
 #SBATCH --error=collatz_phase1_%j.err
 #SBATCH --exclusive
 
 # MareNostrum 5 - Phase 1: GPP Nodes Only (MPI + OpenMP)
-# Expected throughput: ~1.3B numbers/sec (5 nodes × 112 cores × 2.3M/sec)
+# Shared resource pool: 150 GPP nodes for all participants
+# Using 3 nodes for initial testing (conservative allocation)
+# Expected throughput: ~750M numbers/sec (3 nodes × 112 cores × 2.3M/sec)
 
 echo "========================================="
 echo "Collatz Phase 1 - GPP Nodes Only"
@@ -57,7 +59,7 @@ fi
 
 # Test parameters (adjust as needed)
 START_SEED=0
-END_SEED=10000000000  # 10 billion numbers (adjust for testing)
+END_SEED=1000000000  # 1 billion for initial test (fast validation)
 OUTPUT_PREFIX="phase1_gpp_test"
 
 echo "========================================="
@@ -69,7 +71,7 @@ echo ""
 
 # Run the MPI program
 # Each MPI rank will spawn $OMP_NUM_THREADS threads
-# Total parallelism: 5 nodes × 112 threads = 560 parallel threads
+# Total parallelism: 3 nodes × 112 threads = 336 parallel threads
 mpirun -np $SLURM_NTASKS \
        --map-by ppr:1:node \
        --bind-to none \

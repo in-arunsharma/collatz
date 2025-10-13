@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-V14B_PATH="../parallel/V1.4b-openmp.cpp"
+V14B_PATH="collatz_core_v14b.cpp"
 WORKER_FILE="worker_gpp_node.cpp"
 
 echo "========================================="
@@ -13,8 +13,8 @@ echo "========================================="
 
 # Check if V1.4b exists
 if [ ! -f "$SCRIPT_DIR/$V14B_PATH" ]; then
-    echo "ERROR: V1.4b-openmp.cpp not found at $V14B_PATH"
-    echo "Please ensure parallel/V1.4b-openmp.cpp exists"
+    echo "ERROR: collatz_core_v14b.cpp not found"
+    echo "This file should be in the marenostrum/ folder"
     exit 1
 fi
 
@@ -54,9 +54,9 @@ EOF
 sed -i '/^#include.*node_config.hpp/a \
 \
 // V1.4b-openmp core integration\
-#include "../parallel/V1.4b-openmp.cpp"' "$SCRIPT_DIR/$WORKER_FILE"
+#include "collatz_core_v14b.cpp"' "$SCRIPT_DIR/$WORKER_FILE"
 
-echo "✓ Added #include directive for V1.4b-openmp.cpp"
+echo "✓ Added #include directive for collatz_core_v14b.cpp"
 
 # Replace the dummy computation
 sed -i 's/uint32_t steps = (n % 100);.*$/uint32_t steps = process_number(n);  \/\/ V1.4b core/' "$SCRIPT_DIR/$WORKER_FILE"
