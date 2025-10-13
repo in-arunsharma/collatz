@@ -1,0 +1,210 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    MARENOSTRUM PHASE 1 DEPLOYMENT CHECKLIST                    ║
+║                          (Print this for Monday!)                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PRE-DEPLOYMENT (Monday 9:00 AM)                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+□ Step 1: Integrate V1.4b Core
+   Location: marenostrum/worker_gpp_node.cpp
+   Action: Add #include "../parallel/V1.4b-openmp.cpp" at top
+   Action: Replace dummy computation with process_number(n)
+   Time: ~10 minutes
+   ✓ When done, check: Code compiles without errors
+
+□ Step 2: Local Build
+   Command: cd marenostrum/ && ./build_phase1_gpp.sh
+   Expected: "Build successful: collatz_mpi_gpp"
+   Time: ~1 minute
+   ✓ When done, check: Executable exists (ls -lh collatz_mpi_gpp)
+
+□ Step 3: Local MPI Test
+   Command: ./test_local_mpi.sh 2
+   Expected: "✓ Test PASSED"
+   Time: ~2 minutes
+   ✓ When done, check: JSON files created (ls *.json)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ MARENOSTRUM DEPLOYMENT (Monday 9:15 AM)                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+□ Step 4: Package Code
+   Location: ~/Desktop/MN25/
+   Command: tar czf collatz_mn5.tar.gz marenostrum/ parallel/V1.4b-openmp.cpp
+   Time: ~30 seconds
+   ✓ When done, check: ls -lh collatz_mn5.tar.gz
+
+□ Step 5: Transfer to MareNostrum
+   Command: scp collatz_mn5.tar.gz <USERNAME>@mn5.bsc.es:~/
+   Replace: <USERNAME> with your MareNostrum username
+   Time: ~1 minute (depends on network)
+   ✓ When done, check: File appears on MareNostrum
+
+□ Step 6: SSH to MareNostrum
+   Command: ssh <USERNAME>@mn5.bsc.es
+   Time: ~30 seconds
+   ✓ When done, check: You're logged into MareNostrum terminal
+
+□ Step 7: Extract Code
+   Command: tar xzf collatz_mn5.tar.gz && cd marenostrum/
+   Command: chmod +x *.sh
+   Time: ~15 seconds
+   ✓ When done, check: ls -lh (see all files)
+
+□ Step 8: Build on MareNostrum
+   Command: ./build_phase1_gpp.sh
+   Expected: Modules loaded, compilation successful
+   Time: ~1 minute
+   ✓ When done, check: ls -lh collatz_mpi_gpp
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ JOB SUBMISSION (Monday 9:25 AM)                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+□ Step 9: Configure SLURM Job (Optional)
+   File: slurm_phase1_gpp.slurm
+   Edit: START_SEED=0
+   Edit: END_SEED=10000000000  (10 billion - adjust as needed)
+   Edit: OUTPUT_PREFIX="phase1_production"
+   Time: ~2 minutes
+   ✓ When done, check: Parameters match your test plan
+
+□ Step 10: Submit Job
+   Command: sbatch slurm_phase1_gpp.slurm
+   Expected: "Submitted batch job <JOBID>"
+   Note: Write down JOBID: __________
+   Time: Instant
+   ✓ When done, check: Job appears in queue
+
+□ Step 11: Monitor Job
+   Command: squeue -u $USER
+   Expected: See job with state R (running) or PD (pending)
+   Command: tail -f collatz_phase1_<JOBID>.out
+   Expected: See progress output
+   Time: Check every 1-2 minutes
+   ✓ When done, check: Job completes successfully
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ RESULTS COLLECTION (After job completes)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+□ Step 12: Verify Output
+   Command: ls -lh *.json
+   Expected: phase1_production_rank*.json files
+   Expected: phase1_production_global.json (aggregated results)
+   Time: Instant
+   ✓ When done, check: File sizes reasonable (KB - MB range)
+
+□ Step 13: Check Results
+   Command: cat phase1_production_global.json | grep throughput
+   Expected: throughput_per_sec > 1000000000 (>1B/sec)
+   Time: ~1 minute
+   ✓ When done, check: Performance meets expectations
+
+□ Step 14: Download Results (from local machine)
+   Command: scp <USERNAME>@mn5.bsc.es:~/marenostrum/*.json ./results/
+   Time: ~30 seconds
+   ✓ When done, check: JSON files on local machine
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PERFORMANCE VALIDATION                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Expected Performance (5 GPP nodes):
+   □ Total throughput: 1.0 - 1.5 billion numbers/sec
+   □ Walltime (10B numbers): 7-10 seconds
+   □ All 5 ranks completed successfully
+   □ Cycle seeds detected: ~100-150
+   □ Overflow seeds detected: ~20-30
+   □ Max steps found: ~500-600
+
+If performance is LOW (<500M/sec):
+   □ Check: OMP_NUM_THREADS set correctly (should be 112)
+   □ Check: All nodes are GPP type (not ACC)
+   □ Check: No errors in .err file
+
+If performance is GOOD (>1B/sec):
+   ✓ Phase 1 SUCCESS! Ready for Phase 2 (ACC nodes)
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ QUICK REFERENCE COMMANDS                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Local testing:
+   ./build_phase1_gpp.sh                    # Build
+   ./test_local_mpi.sh 2                    # Test with 2 ranks
+
+MareNostrum:
+   sbatch slurm_phase1_gpp.slurm            # Submit job
+   squeue -u $USER                          # Check queue
+   tail -f collatz_phase1_<JOBID>.out       # Monitor output
+   scancel <JOBID>                          # Cancel job (if needed)
+   
+Results:
+   cat phase1_production_global.json        # View aggregated results
+   ls -lh *.json                            # List all output files
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ EMERGENCY CONTACTS / RESOURCES                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Documentation:
+   □ QUICKSTART.md          - This summary
+   □ EXECUTION_GUIDE.md     - Full deployment walkthrough
+   □ INTEGRATION_GUIDE.md   - V1.4b integration details
+   □ README.md              - Architecture overview
+
+MareNostrum Support:
+   □ Documentation: https://www.bsc.es/supportkc/docs/MareNostrum5/intro
+   □ Queue info: sinfo, squeue
+   □ Node info: scontrol show node <nodename>
+
+If stuck:
+   1. Check .err file: cat collatz_phase1_<JOBID>.err
+   2. Verify modules: module list
+   3. Check executable: ldd collatz_mpi_gpp
+   4. Re-read EXECUTION_GUIDE.md troubleshooting section
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ TIMELINE ESTIMATE                                                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+09:00 - 09:10   Integration (10 min)
+09:10 - 09:15   Local build & test (5 min)
+09:15 - 09:20   Transfer to MareNostrum (5 min)
+09:20 - 09:25   Build on MareNostrum (5 min)
+09:25 - 09:27   Submit test job (2 min run)
+09:27 - 09:35   Analyze, adjust parameters (8 min)
+09:35 - 09:45   Submit production run (10 min run)
+09:45 - 10:00   Validate results (15 min)
+─────────────────────────────────────────────────────────────────────────────
+10:00           Phase 1 COMPLETE ✓
+
+Next: Phase 2 (ACC nodes with CUDA) 🚀
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ NOTES / OBSERVATIONS                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Job ID: _________________
+
+Throughput achieved: _________________
+
+Issues encountered:
+
+
+
+
+
+Next steps:
+
+
+
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    GOOD LUCK AT THE HACKATHON! 🚀                             ║
+║                  You're going to crush 1 billion/sec! 💪                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
