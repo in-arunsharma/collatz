@@ -12,6 +12,9 @@
 
 // Include node configuration
 #include "node_config.hpp"
+
+// V1.4b-openmp core integration
+#include "collatz_core_v14b.cpp"
 #include "marenostrum_config.hpp"
 
 // Import V1.4b-openmp core functionality

@@ -3,12 +3,14 @@
 // This wraps your proven V1.4b-openmp code with MPI for multi-node scaling
 
 #include <mpi.h>
+#include <omp.h>
 #include <iostream>
 #include <cstdio>
 #include <cstdint>
 #include <chrono>
 #include <string>
 #include <vector>
+#include <unistd.h>  // for sleep
 
 #include "node_config.hpp"
 #include "mpi_coordinator.hpp"
@@ -132,16 +134,27 @@ int worker_process(const ProgramArgs& args, MPICoordinator& coordinator) {
     // Print node info
     print_node_config(config);
     
-    // Validate this is a GPP node
-    if (config.type != NodeType::GPP) {
-        fprintf(stderr, "[ERROR] Rank %d: Expected GPP node, got %d\n", 
-                coordinator.rank(), (int)config.type);
+    // Validate this is a GPP node (or allow UNKNOWN for local testing)
+    if (config.type != NodeType::GPP && config.type != NodeType::UNKNOWN) {
+        fprintf(stderr, "[ERROR] Rank %d: Expected GPP or UNKNOWN (local test), got ACC node\n", 
+                coordinator.rank());
         return 1;
+    }
+    
+    // For local testing with UNKNOWN nodes, treat as GPP
+    if (config.type == NodeType::UNKNOWN) {
+        fprintf(stderr, "[Rank %d] Local testing mode: treating UNKNOWN node as GPP\n",
+                coordinator.rank());
+        config.type = NodeType::GPP;
+        // Use actual available threads if not already set
+        if (config.openmp_threads == 0) {
+            config.openmp_threads = omp_get_max_threads();
+        }
     }
     
     // Validate against MareNostrum 5 specs
     if (!validate_marenostrum_config(config)) {
-        fprintf(stderr, "[WARNING] Rank %d: Configuration doesn't match MN5 specs\n",
+        fprintf(stderr, "[WARNING] Rank %d: Configuration doesn't match MN5 specs (OK for local testing)\n",
                 coordinator.rank());
         // Continue anyway (might be testing locally)
     }
@@ -222,17 +235,13 @@ int main(int argc, char** argv) {
     
     int return_code = 0;
     
-    try {
-        if (coordinator.is_master()) {
-            // Rank 0: Master process
-            return_code = master_process(args, coordinator);
-        } else {
-            // Ranks 1..N: Worker processes
-            return_code = worker_process(args, coordinator);
-        }
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[Rank %d] EXCEPTION: %s\n", coordinator.rank(), e.what());
-        return_code = 1;
+    // Execute the appropriate process based on rank
+    if (coordinator.is_master()) {
+        // Rank 0: Master process
+        return_code = master_process(args, coordinator);
+    } else {
+        // Ranks 1..N: Worker processes
+        return_code = worker_process(args, coordinator);
     }
     
     // Synchronize before exit

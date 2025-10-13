@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <unistd.h>  // for gethostname
 
 #ifdef __CUDACC__
 #include <cuda_runtime.h>

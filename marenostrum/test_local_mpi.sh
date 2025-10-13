@@ -20,17 +20,21 @@ END_SEED=1000000  # 1 million numbers (quick test)
 OUTPUT_PREFIX="local_test"
 
 # Determine number of MPI ranks to use
+NUM_CORES=$(nproc)
 if [ $# -gt 0 ]; then
     NUM_RANKS=$1
 else
     # Auto-detect: use 4 ranks or number of physical cores, whichever is smaller
-    NUM_CORES=$(nproc)
     NUM_RANKS=$((NUM_CORES < 4 ? NUM_CORES : 4))
 fi
 
 # Set OpenMP threads per rank
 # For local testing: divide available cores among ranks
-THREADS_PER_RANK=$((NUM_CORES / NUM_RANKS))
+if [ $NUM_CORES -gt 0 ] && [ $NUM_RANKS -gt 0 ]; then
+    THREADS_PER_RANK=$((NUM_CORES / NUM_RANKS))
+else
+    THREADS_PER_RANK=4
+fi
 export OMP_NUM_THREADS=$THREADS_PER_RANK
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
