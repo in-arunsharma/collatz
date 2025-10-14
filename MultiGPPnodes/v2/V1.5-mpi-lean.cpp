@@ -25,7 +25,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
-#include <time.h>
+//#include <time.h>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -586,60 +586,52 @@ CollatzResult compute_collatz_readonly(uint128_t n,
 }
 
 // ----- Cold queue processing (per-thread, non-parallel) -----
+
 static void process_cold_queue_fuse(std::deque<ColdQueueEntry>& queue, 
                                    ThreadStats& stats,
-                                   const uint32_t* memo_ptr) {
+                                   const uint32_t* /*memo_ptr unused*/) {
     if (queue.empty()) return;
-    
+
     struct timespec t_start, t_end;
     clock_gettime(CLOCK_MONOTONIC, &t_start);
-    
+
+    std::deque<ColdQueueEntry> escalate_to_q2;   // *** NEW ***
+
     for (const auto& entry : queue) {
         BrentResult brent = detect_cycle_brent_128(entry.seed, EXTENDED_FUSE);
-        
+
         if (brent.cycle_found) {
             stats.cold_q1_cycles_found++;
             log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
-        } else if (!brent.overflow) {
+        } else if (brent.overflow) {
+            // *** escalate to 256-bit Brent when 128-bit Brent overflows
+            escalate_to_q2.emplace_back(entry.seed, brent.steps, entry.peak_before_cold);
+        } else {
             stats.cold_q1_verified_ok++;
         }
     }
-    
     queue.clear();
-    
+
+    // Run escalations with 256-bit Brent
+    for (const auto& e : escalate_to_q2) {
+        uint256_t seed_256(e.seed);
+        BrentResult br = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
+        if (br.cycle_found) {
+            stats.cold_q2_cycles_found++;
+            log_cycle_seed(e.seed, br.cycle_length, br.cycle_value);
+        } else if (br.overflow) {
+            stats.cold_q2_256bit_overflow++;
+            log_256bit_overflow(e.seed, br.steps);
+        } else {
+            stats.cold_q2_verified_ok++;
+        }
+    }
+
     clock_gettime(CLOCK_MONOTONIC, &t_end);
     double elapsed = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
     stats.cold_processing_time_ms += elapsed * 1000;
 }
 
-static void process_cold_queue_overflow(std::deque<ColdQueueEntry>& queue,
-                                       ThreadStats& stats) {
-    if (queue.empty()) return;
-    
-    struct timespec t_start, t_end;
-    clock_gettime(CLOCK_MONOTONIC, &t_start);
-    
-    for (const auto& entry : queue) {
-        uint256_t seed_256(entry.seed);
-        BrentResult brent = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
-        
-        if (brent.cycle_found) {
-            stats.cold_q2_cycles_found++;
-            log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
-        } else if (brent.overflow) {
-            stats.cold_q2_256bit_overflow++;
-            log_256bit_overflow(entry.seed, brent.steps);
-        } else {
-            stats.cold_q2_verified_ok++;
-        }
-    }
-    
-    queue.clear();
-    
-    clock_gettime(CLOCK_MONOTONIC, &t_end);
-    double elapsed = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
-    stats.cold_processing_time_ms += elapsed * 1000;
-}
 
 // ----- Mod-6 helpers -----
 static inline uint32_t mod3_u128(uint128_t n) {
@@ -660,8 +652,40 @@ static inline void align_start_and_delta(uint128_t &n, uint64_t &delta) {
     delta = (r3 == 1) ? 4 : 2;
 }
 
+
+static void process_cold_queue_overflow(std::deque<ColdQueueEntry>& queue,
+                                    ThreadStats& stats) {
+    if (queue.empty()) return;
+
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+
+    for (const auto& entry : queue) {
+        uint256_t seed_256(entry.seed);
+        BrentResult brent = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
+
+        if (brent.cycle_found) {
+            stats.cold_q2_cycles_found++;
+            log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
+        } else if (brent.overflow) {
+            stats.cold_q2_256bit_overflow++;
+            log_256bit_overflow(entry.seed, brent.steps);
+        } else {
+            stats.cold_q2_verified_ok++;
+        }
+    }
+
+    queue.clear();
+
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    double elapsed =
+        (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
+    stats.cold_processing_time_ms += elapsed * 1000.0;
+}
+
 // ----- Main driver -----
-int main(int argc, char** argv) {
+int main(int argc, char** argv) 
+{
 
 
    
@@ -670,8 +694,10 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    if (argc < 3) {
-        if (rank == 0) {
+    if (argc < 3) 
+    {
+        if (rank == 0) 
+        {
             fprintf(stderr, "Usage: %s <start_offset> <count> [options]\n", argv[0]);
             fprintf(stderr, "Options:\n");
             fprintf(stderr, "  --threads <N>        Set number of OpenMP threads (default: all available)\n");
@@ -688,6 +714,8 @@ int main(int argc, char** argv) {
     uint64_t count = std::stoull(argv[2]);
     const char* run_tag = "v15mpi";
     int num_threads = 0;
+
+    bool enable_logs = true;
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
             num_threads = std::stoi(argv[++i]);
@@ -695,41 +723,41 @@ int main(int argc, char** argv) {
             SMALL_LIMIT_BITS = std::stoul(argv[++i]);
         } else if (strcmp(argv[i], "--tag") == 0 && i + 1 < argc) {
             run_tag = argv[++i];
+        } else if (strcmp(argv[i], "--no-logs") == 0) {
+            enable_logs = false;
         }
     }
+
+
     if (num_threads > 0) {
         omp_set_num_threads(num_threads);
     } else {
         num_threads = omp_get_max_threads();
     }
 
-
-    // DEBUG: now rank and threads are known
-    #pragma omp parallel
-    {
-    #pragma omp single
-    fprintf(stderr,"[RANK %d] omp_get_num_threads()=%d\n",
-            rank, omp_get_num_threads());
-    }
-    {
-    FILE* f = fopen("/proc/self/status","r");
-    if (f) {
-        char line[4096];
-        while (fgets(line,sizeof(line),f)) {
-        if (strncmp(line,"Cpus_allowed_list",17)==0) {
-            fprintf(stderr,"[RANK %d] %s", rank, line); // should look like 0-111
-            break;
+    const char* dbg = getenv("COLLATZ_DEBUG");
+    if (dbg && *dbg=='1') {
+        #pragma omp parallel
+        { 
+            #pragma omp single
+            fprintf(stderr,"[RANK %d] omp_get_num_threads()=%d\n", rank, omp_get_num_threads());
         }
+        FILE* f = fopen("/proc/self/status","r");
+        if (f) {
+            char line[4096];
+            while (fgets(line,sizeof(line),f))
+            if (!strncmp(line,"Cpus_allowed_list",17)) 
+                { fprintf(stderr,"[RANK %d] %s", rank, line); 
+                    break; 
+                }
+            fclose(f);
         }
-        fclose(f);
-    }
     }
 
-
-
+    
 
     std::string tag_rank = std::string(run_tag) + "_r" + std::to_string(rank);
-    open_logs_once(tag_rank.c_str());
+    if (enable_logs) open_logs_once(tag_rank.c_str());
     
     
     
@@ -737,7 +765,7 @@ int main(int argc, char** argv) {
     memo.resize(small_limit, UNKNOWN);
     precompute_small_table();
     validate_memo_table();
-    uint64_t prefault_sum = 0;
+    volatile uint64_t prefault_sum = 0;
     for (uint64_t i = 0; i < small_limit; i += 1024) {
         prefault_sum += memo[i];
     }
@@ -753,11 +781,12 @@ int main(int argc, char** argv) {
     if (rank == 0) {
         fprintf(stderr, "[MPI] size=%d\n", size);
     }
-    fprintf(stderr, "[RANK %d] Scanning [", rank);
-    print_u128(start);
-    fprintf(stderr, ", ");
-    print_u128(end);
-    fprintf(stderr, ") with %d threads\n", num_threads);
+    fprintf(stderr, "[RANK %d] Scanning [%s, %s) with %d threads\n",
+        rank,
+        to_string_u128(start).c_str(),
+        to_string_u128(end).c_str(),
+        num_threads);
+
     std::vector<uint128_t> numbers_to_test;
     {
         uint128_t n = start;
@@ -779,6 +808,10 @@ int main(int argc, char** argv) {
     MPI_Barrier(MPI_COMM_WORLD);
     double t0 = MPI_Wtime();
 
+    uint128_t first_local = numbers_to_test.empty() ? 0 : numbers_to_test.front();
+    uint128_t last_local  = numbers_to_test.empty() ? 0 : numbers_to_test.back();
+    uint64_t last_hi = (uint64_t)(last_local >> 64), last_lo = (uint64_t)last_local;
+    uint64_t first_hi = (uint64_t)(first_local >> 64), first_lo = (uint64_t)first_local;
 
 
     
@@ -880,6 +913,43 @@ int main(int argc, char** argv) {
     if (g_fuse_log.is_open()) g_fuse_log.close();
     if (g_cycle_log.is_open()) g_cycle_log.close();
     if (g_256bit_overflow_log.is_open()) g_256bit_overflow_log.close();
+
+
+
+
+
+
+
+    std::vector<uint64_t> all_last_hi, all_last_lo, all_first_hi, all_first_lo;
+    if (rank == 0) {
+        all_last_hi.resize(size); all_last_lo.resize(size);
+        all_first_hi.resize(size); all_first_lo.resize(size);
+    }
+    MPI_Gather(&last_hi,  1, MPI_UINT64_T, rank==0?all_last_hi.data():nullptr,  1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Gather(&last_lo,  1, MPI_UINT64_T, rank==0?all_last_lo.data():nullptr,  1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Gather(&first_hi, 1, MPI_UINT64_T, rank==0?all_first_hi.data():nullptr, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+    MPI_Gather(&first_lo, 1, MPI_UINT64_T, rank==0?all_first_lo.data():nullptr, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) 
+    {
+        auto make128 = [](uint64_t hi, uint64_t lo)->__uint128_t { return ((__uint128_t)hi<<64) | lo; };
+        uint128_t global_first = 0, global_last = 0;
+        for (int r=0; r<size; ++r) 
+        {
+            uint128_t f = make128(all_first_hi[r], all_first_lo[r]);
+            uint128_t l = make128(all_last_hi[r],  all_last_lo[r]);
+            if (r==0 || f < global_first) global_first = f;
+            if (r==0 || l > global_last)  global_last  = l;
+        }
+        // write a compact summary you can grep later
+        std::ofstream prog(("progress_" + std::string(run_tag) + ".txt").c_str(), std::ios::app);
+        if (prog) {
+            prog << "first_tested "; prog << to_string_u128(global_first)
+                << "  last_tested "; prog << to_string_u128(global_last) << "\n";
+        }
+    }
+
+
     MPI_Finalize();
     return 0;
 }
