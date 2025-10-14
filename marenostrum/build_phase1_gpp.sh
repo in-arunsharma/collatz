@@ -29,11 +29,17 @@ fi
 
 # Compiler settings
 if [[ "$ON_MARENOSTRUM" == true ]]; then
-    CXX=mpic++
-    CXXFLAGS="-O3 -march=native -std=c++17 -fopenmp"
+    CXX=mpiicpc
+    CXXFLAGS="-O3 -xHost -std=c++17 -qopenmp -ipo -no-prec-div -fp-model fast=2"
 else
-    CXX=${MPICXX:-mpic++}
-    CXXFLAGS="-O3 -march=native -std=c++17 -fopenmp -Wno-psabi"
+    # Auto-detect: prefer Intel MPI, fall back to mpic++
+    if command -v mpiicpc &> /dev/null; then
+        CXX=mpiicpc
+        CXXFLAGS="-O3 -xHost -std=c++17 -qopenmp -ipo -no-prec-div -fp-model fast=2"
+    else
+        CXX=${MPICXX:-mpic++}
+        CXXFLAGS="-O3 -march=native -std=c++17 -fopenmp -Wno-psabi"
+    fi
 fi
 
 # Git hash for reproducibility
@@ -41,8 +47,16 @@ GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 CXXFLAGS="$CXXFLAGS -DGIT_HASH='\"$GIT_HASH\"'"
 
 # Additional optimization flags
-CXXFLAGS="$CXXFLAGS -flto -fno-exceptions -fno-rtti -funroll-loops"
-CXXFLAGS="$CXXFLAGS -fno-asynchronous-unwind-tables -DNDEBUG"
+if [[ "$CXX" == "mpiicpc" ]]; then
+    # Intel-specific optimizations
+    CXXFLAGS="$CXXFLAGS -fno-exceptions -fno-rtti -funroll-loops"
+    CXXFLAGS="$CXXFLAGS -qopt-prefetch=4 -qopt-mem-layout-trans=4"
+    CXXFLAGS="$CXXFLAGS -DNDEBUG -diag-disable=10441"
+else
+    # GCC-specific optimizations
+    CXXFLAGS="$CXXFLAGS -flto -fno-exceptions -fno-rtti -funroll-loops"
+    CXXFLAGS="$CXXFLAGS -fno-asynchronous-unwind-tables -DNDEBUG"
+fi
 
 echo "Compiler: $CXX"
 echo "Flags: $CXXFLAGS"

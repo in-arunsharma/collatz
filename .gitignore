@@ -17,7 +17,9 @@ parallel/output/*.txt
 secuncialTech/*_test*.txt
 secuncialTech/perf_*.txt
 secuncialTech/output_*.txt
-
+MultiGPPnodes/v2/result/*.txt
+MultiGPPnodes/v2/result/*.out
+MultiGPPnodes/v2/result/*.err
 # Keep JSON metadata (small and valuable)
 # !*.json
 

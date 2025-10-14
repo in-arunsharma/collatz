@@ -1,22 +1,23 @@
-// V1.6-mpi-openmp: MPI + OpenMP Hybrid for MareNostrum 5 GPP Multi-Node
+// V1.5-openmp: OpenMP Parallel Version for MareNostrum 5 GPP
 //
 // PARALLELIZATION STRATEGY:
-// - MPI: Distribute work across nodes (embarrassingly parallel)
-// - OpenMP: Utilize all cores within each node (112 per node)
-// - No inter-node communication during computation
-// - Aggregate results at end with MPI_Reduce
+// - Read-only memo table (thread-safe by design)
+// - Embarrassingly parallel: each thread tests independent ranges
+// - Dynamic scheduling for load balancing
+// - Thread-local statistics, combined at end
+// - Chunk-based work distribution (512 numbers per chunk)
 //
-// TARGET: MareNostrum 5 GPP multi-node
-// EXPECTED: 137M nums/sec × N nodes (linear scaling)
+// TARGET: MareNostrum 5 GPP nodes (56-112 cores)
+// EXPECTED: 100-200M nums/sec (50-100× speedup over sequential)
 //
-// BASED ON: V1.5-openmp (verified 137M nums/sec per node)
+// BASED ON: V1.4b (Hot/Cold Queue Architecture with Cycle Detection)
 //
-// CHANGES FROM V1.5-openmp:
-// 1. Added MPI initialization and finalization
-// 2. Split work range by MPI rank
-// 3. Each rank processes independent subrange
-// 4. Aggregate statistics with MPI_Reduce at end
-// 5. Root rank prints combined results
+// CHANGES FROM V1.4b:
+// 1. Added OpenMP parallel for loop with dynamic scheduling
+// 2. Thread-local cold queues (avoid mutex contention)
+// 3. Combined statistics from all threads at end
+// 4. Thread-safe logging (already had mutex)
+// 5. Chunk size tuning for load balance
 
 #include <iostream>
 #include <vector>
@@ -31,13 +32,13 @@
 #include <iomanip>
 #include <mutex>
 #include <deque>
-#include <omp.h>
+#include <omp.h>  // OpenMP header
 #include <mpi.h>  // MPI header
 
-// ----- 128-bit utilities -----
+// ----- Basic 128-bit utilities -----
 typedef __uint128_t uint128_t;
 
-// ----- 256-bit arithmetic (same as V1.5) -----
+// ----- 256-bit arithmetic (same as V1.4b) -----
 struct uint256_t {
     uint64_t limbs[4];
     
@@ -162,7 +163,7 @@ struct uint256_t {
     }
 };
 
-// ----- 128-bit utilities -----
+// ----- 128-bit utility functions -----
 static inline uint128_t u128_from_u64(uint64_t x) {
     return (uint128_t)x;
 }
@@ -208,13 +209,14 @@ static int ctz_u128(uint128_t x) {
     return 64 + __builtin_ctzll(hi);
 }
 
-// ----- Result structures -----
+// ----- Result structure -----
 struct CollatzResult {
     uint64_t steps;
     uint128_t peak;
     bool overflow;
 };
 
+// ----- Cold queue structures -----
 struct ColdQueueEntry {
     uint128_t seed;
     uint64_t steps_before_cold;
@@ -224,6 +226,7 @@ struct ColdQueueEntry {
         : seed(s), steps_before_cold(st), peak_before_cold(p) {}
 };
 
+// ----- Brent cycle detection result -----
 struct BrentResult {
     bool cycle_found;
     uint64_t steps;
@@ -240,12 +243,13 @@ static constexpr size_t MAX_COLD_QUEUE_SIZE = 1000;
 static constexpr uint32_t UNKNOWN = UINT32_MAX;
 static constexpr uint128_t MAX_SAFE = ((~(uint128_t)0) - 1) / 3;
 
-// ----- Global memo table -----
+// ----- Global memo table (read-only after precompute - THREAD-SAFE) -----
 static uint32_t SMALL_LIMIT_BITS = 20;
 static uint64_t small_limit = 0;
 static std::vector<uint32_t> memo;
+static bool enable_progress = false;
 
-// ----- Logging (thread-safe) -----
+// ----- Logging infrastructure (thread-safe with mutex) -----
 static std::mutex g_log_mutex;
 static std::ofstream g_overflow_log;
 static std::ofstream g_fuse_log;
@@ -253,7 +257,7 @@ static std::ofstream g_cycle_log;
 static std::ofstream g_256bit_overflow_log;
 static bool logs_opened = false;
 
-// ----- Statistics structure -----
+// ----- Thread-local statistics structure -----
 struct ThreadStats {
     uint64_t tested = 0;
     uint64_t total_steps = 0;
@@ -272,16 +276,29 @@ struct ThreadStats {
     double cold_processing_time_ms = 0.0;
 };
 
-// ----- Logging helpers -----
-static void open_logs_once(const char* run_tag, int rank) {
+// ----- Logging helpers (same as V1.4b, already thread-safe) -----
+static void open_logs_once(const char* run_tag) {
     if (logs_opened) return;
     logs_opened = true;
     
-    std::string tag = std::string(run_tag ? run_tag : "v16mpi") + "_rank" + std::to_string(rank);
+    std::string tag = run_tag ? run_tag : "v15omp";
     g_overflow_log.open("overflow_seeds_" + tag + ".txt", std::ios::app);
     g_fuse_log.open("fuse_seeds_" + tag + ".txt", std::ios::app);
     g_cycle_log.open("cycle_seeds_" + tag + ".txt", std::ios::app);
     g_256bit_overflow_log.open("256bit_overflow_" + tag + ".txt", std::ios::app);
+    
+    if (g_overflow_log.is_open()) {
+        g_overflow_log << "# Overflow seeds - V1.5-openmp\n";
+    }
+    if (g_fuse_log.is_open()) {
+        g_fuse_log << "# Fuse-hit seeds - V1.5-openmp\n";
+    }
+    if (g_cycle_log.is_open()) {
+        g_cycle_log << "# GENUINE CYCLES FOUND - V1.5-openmp\n";
+    }
+    if (g_256bit_overflow_log.is_open()) {
+        g_256bit_overflow_log << "# 256-bit overflow - V1.5-openmp\n";
+    }
 }
 
 static inline void log_overflow_seed(uint128_t n, uint64_t steps, uint128_t peak) {
@@ -316,7 +333,7 @@ static inline void log_256bit_overflow(uint128_t n, uint64_t steps) {
     }
 }
 
-// ----- Brent cycle detection (same as V1.5) -----
+// ----- Brent cycle detection (same as V1.4b) -----
 static BrentResult detect_cycle_brent_128(uint128_t n, uint64_t max_steps) {
     BrentResult result = {false, 0, 0, "", false};
     
@@ -421,19 +438,19 @@ static BrentResult detect_cycle_brent_256(uint256_t n, uint64_t max_steps) {
     return result;
 }
 
-// ----- Precompute table -----
-static void precompute_small_table(int rank) {
+// ----- Precompute table (same as V1.4b) -----
+static void precompute_small_table() {
     memo[0] = UNKNOWN;
     memo[1] = 0;
     
-    if (rank == 0) {
-        fprintf(stderr, "[PRECOMPUTE] Filling 2^%u table entries...\n", SMALL_LIMIT_BITS);
-    }
+    fprintf(stderr, "[PRECOMPUTE] Filling 2^%u table entries...\n", SMALL_LIMIT_BITS);
     
     uint64_t filled = 2;
     
     for (uint64_t n = 2; n < small_limit; n++) {
-        if (memo[n] != UNKNOWN) continue;
+        if (memo[n] != UNKNOWN) {
+            continue;
+        }
         
         std::vector<uint64_t> path_vals;
         std::vector<uint64_t> path_steps;
@@ -453,7 +470,9 @@ static void precompute_small_table(int rank) {
                 break;
             }
             
-            if (steps >= SAFETY_FUSE) break;
+            if (steps >= SAFETY_FUSE) {
+                break;
+            }
             
             if (current < small_limit) {
                 path_vals.push_back((uint64_t)current);
@@ -465,7 +484,9 @@ static void precompute_small_table(int rank) {
                 current >>= shift;
                 steps += shift;
             } else {
-                if (current > MAX_SAFE) break;
+                if (current > MAX_SAFE) {
+                    break;
+                }
                 uint128_t t = 3 * current + 1;
                 int k = ctz_u128(t);
                 current = t >> k;
@@ -473,7 +494,9 @@ static void precompute_small_table(int rank) {
             }
         }
         
-        if (!completed) continue;
+        if (!completed) {
+            continue;
+        }
         
         for (int i = (int)path_vals.size() - 1; i >= 0; i--) {
             uint64_t val = path_vals[i];
@@ -484,14 +507,32 @@ static void precompute_small_table(int rank) {
         }
     }
     
-    if (rank == 0) {
-        fprintf(stderr, "[PRECOMPUTE] Filled %llu / %llu entries (%.2f%%)\n", 
-                (unsigned long long)filled, (unsigned long long)small_limit, 
-                100.0 * (double)filled / (double)small_limit);
-    }
+    fprintf(stderr, "[PRECOMPUTE] Filled %llu / %llu entries (%.2f%%)\n", 
+            (unsigned long long)filled, (unsigned long long)small_limit, 
+            100.0 * (double)filled / (double)small_limit);
 }
 
-// ----- Collatz computation -----
+static bool validate_memo_table() {
+    auto has = [&](uint64_t i) { return i < small_limit; };
+    
+    if (has(1) && memo[1] != 0) {
+        fprintf(stderr, "[VALIDATE] FAILED: memo[1] = %u, expected 0\n", memo[1]);
+        return false;
+    }
+    if (has(2) && memo[2] != 1) {
+        fprintf(stderr, "[VALIDATE] FAILED: memo[2] = %u, expected 1\n", memo[2]);
+        return false;
+    }
+    if (has(3) && memo[3] != 7) {
+        fprintf(stderr, "[VALIDATE] FAILED: memo[3] = %u, expected 7\n", memo[3]);
+        return false;
+    }
+    
+    fprintf(stderr, "[VALIDATE] Self-test passed\n");
+    return true;
+}
+
+// ----- Collatz computation (same as V1.4b) -----
 __attribute__((always_inline)) static inline
 CollatzResult compute_collatz_readonly(uint128_t n, 
                                        const uint32_t* __restrict memo_ptr,
@@ -544,7 +585,7 @@ CollatzResult compute_collatz_readonly(uint128_t n,
     return res;
 }
 
-// ----- Cold queue processing -----
+// ----- Cold queue processing (per-thread, non-parallel) -----
 static void process_cold_queue_fuse(std::deque<ColdQueueEntry>& queue, 
                                    ThreadStats& stats,
                                    const uint32_t* memo_ptr) {
@@ -621,32 +662,32 @@ static inline void align_start_and_delta(uint128_t &n, uint64_t &delta) {
 
 // ----- Main driver -----
 int main(int argc, char** argv) {
-    // Initialize MPI
+
+
+   
     MPI_Init(&argc, &argv);
-    
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    
+
     if (argc < 3) {
         if (rank == 0) {
             fprintf(stderr, "Usage: %s <start_offset> <count> [options]\n", argv[0]);
             fprintf(stderr, "Options:\n");
-            fprintf(stderr, "  --threads <N>        OpenMP threads per node (default: all)\n");
-            fprintf(stderr, "  --small-limit <N>    Memo table bits (default: 20)\n");
-            fprintf(stderr, "  --tag <name>         Run tag (default: v16mpi)\n");
+            fprintf(stderr, "  --threads <N>        Set number of OpenMP threads (default: all available)\n");
+            fprintf(stderr, "  --small-limit <N>    Set memo table bits (default: 20)\n");
+            fprintf(stderr, "  --tag <name>         Set run tag for output files (default: v15mpi)\n");
         }
         MPI_Finalize();
         return 1;
     }
-    
+
+
+
     uint64_t start_offset = std::stoull(argv[1]);
-    uint64_t total_count = std::stoull(argv[2]);
-    
-    const char* run_tag = "v16mpi";
+    uint64_t count = std::stoull(argv[2]);
+    const char* run_tag = "v15mpi";
     int num_threads = 0;
-    
-    // Parse optional arguments
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
             num_threads = std::stoi(argv[++i]);
@@ -656,59 +697,67 @@ int main(int argc, char** argv) {
             run_tag = argv[++i];
         }
     }
-    
-    // Set OpenMP threads
     if (num_threads > 0) {
         omp_set_num_threads(num_threads);
     } else {
         num_threads = omp_get_max_threads();
     }
-    
-    if (rank == 0) {
-        fprintf(stderr, "[CONFIG] MPI ranks: %d\n", size);
-        fprintf(stderr, "[CONFIG] OpenMP threads per rank: %d\n", num_threads);
-        fprintf(stderr, "[CONFIG] Total parallel workers: %d\n", size * num_threads);
+
+
+    // DEBUG: now rank and threads are known
+    #pragma omp parallel
+    {
+    #pragma omp single
+    fprintf(stderr,"[RANK %d] omp_get_num_threads()=%d\n",
+            rank, omp_get_num_threads());
     }
+    {
+    FILE* f = fopen("/proc/self/status","r");
+    if (f) {
+        char line[4096];
+        while (fgets(line,sizeof(line),f)) {
+        if (strncmp(line,"Cpus_allowed_list",17)==0) {
+            fprintf(stderr,"[RANK %d] %s", rank, line); // should look like 0-111
+            break;
+        }
+        }
+        fclose(f);
+    }
+    }
+
+
+
+
+    std::string tag_rank = std::string(run_tag) + "_r" + std::to_string(rank);
+    open_logs_once(tag_rank.c_str());
     
-    // Open logs (per rank)
-    open_logs_once(run_tag, rank);
     
-    // Setup memo table (each rank builds its own copy)
+    
     small_limit = (1ULL << SMALL_LIMIT_BITS);
     memo.resize(small_limit, UNKNOWN);
-    precompute_small_table(rank);
-    
-    // Prefault pages
+    precompute_small_table();
+    validate_memo_table();
     uint64_t prefault_sum = 0;
     for (uint64_t i = 0; i < small_limit; i += 1024) {
         prefault_sum += memo[i];
     }
-    
-    // Split work by rank
-    uint64_t count_per_rank = total_count / size;
-    uint64_t my_start_offset = start_offset + rank * count_per_rank;
-    uint64_t my_count = count_per_rank;
-    
-    // Last rank gets remainder
-    if (rank == size - 1) {
-        my_count = total_count - (size - 1) * count_per_rank;
-    }
-    
+    // Split work among ranks
+    uint64_t count_per = count / size;
+    uint64_t start_r = start_offset + rank * count_per;
+    uint64_t count_r = (rank == size - 1) ? (count - rank * count_per) : count_per;
     uint128_t base = u128_from_u64(1) << 71;
-    uint128_t start = base + my_start_offset;
-    uint128_t end = start + my_count;
+    uint128_t start = base + start_r;
+    uint128_t end = start + count_r;
     uint64_t delta = 4;
     align_start_and_delta(start, delta);
-    
     if (rank == 0) {
-        fprintf(stderr, "[RUN] Total range: [2^71+%llu, 2^71+%llu)\n",
-                (unsigned long long)start_offset,
-                (unsigned long long)(start_offset + total_count));
-        fprintf(stderr, "[RUN] Each rank processes ~%llu numbers\n", 
-                (unsigned long long)count_per_rank);
+        fprintf(stderr, "[MPI] size=%d\n", size);
     }
-    
-    // Build local test list
+    fprintf(stderr, "[RANK %d] Scanning [", rank);
+    print_u128(start);
+    fprintf(stderr, ", ");
+    print_u128(end);
+    fprintf(stderr, ") with %d threads\n", num_threads);
     std::vector<uint128_t> numbers_to_test;
     {
         uint128_t n = start;
@@ -719,42 +768,39 @@ int main(int argc, char** argv) {
             current_delta ^= 6;
         }
     }
-    
-    // Global statistics
+    fprintf(stderr, "[RANK %d] Testing %zu numbers\n", rank, numbers_to_test.size());
     ThreadStats global_stats;
-    
-    // Timing
-    struct timespec t_start, t_end;
-    MPI_Barrier(MPI_COMM_WORLD);  // Synchronize start
-    clock_gettime(CLOCK_MONOTONIC, &t_start);
-    
+    //struct timespec t_start, t_end;
+
+
     const uint32_t* __restrict memo_ptr = memo.data();
+
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t0 = MPI_Wtime();
+
+
+
     
-    // OpenMP parallel loop (same as V1.5)
+
     #pragma omp parallel
     {
         ThreadStats local_stats;
         std::deque<ColdQueueEntry> local_cold_q1;
         std::deque<ColdQueueEntry> local_cold_q2;
-        
-        #pragma omp for schedule(dynamic, 512)
+        #pragma omp for schedule(guided, 8192)
         for (size_t idx = 0; idx < numbers_to_test.size(); idx++) {
             uint128_t n = numbers_to_test[idx];
-            
             CollatzResult res = compute_collatz_readonly(n, memo_ptr, small_limit, SAFETY_FUSE);
-            
             local_stats.tested++;
             local_stats.total_steps += res.steps;
-            
             if (res.steps > local_stats.max_steps_seen) {
                 local_stats.max_steps_seen = res.steps;
                 local_stats.hardest_n = n;
             }
-            
             if (res.peak > local_stats.max_peak) {
                 local_stats.max_peak = res.peak;
             }
-            
             if (res.overflow) {
                 local_stats.overflow_count++;
                 local_stats.cold_q2_triggers++;
@@ -766,33 +812,24 @@ int main(int argc, char** argv) {
                 local_cold_q1.emplace_back(n, res.steps, res.peak);
                 log_fuse_seed(n, res.steps);
             }
-            
-            if (local_stats.tested % COLD_BATCH_SIZE == 0 || 
-                local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE ||
-                local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
-                
+            if (local_stats.tested % COLD_BATCH_SIZE == 0 || local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE || local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
                 process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
                 process_cold_queue_overflow(local_cold_q2, local_stats);
             }
         }
-        
         process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
         process_cold_queue_overflow(local_cold_q2, local_stats);
-        
         #pragma omp critical
         {
             global_stats.tested += local_stats.tested;
             global_stats.total_steps += local_stats.total_steps;
-            
             if (local_stats.max_steps_seen > global_stats.max_steps_seen) {
                 global_stats.max_steps_seen = local_stats.max_steps_seen;
                 global_stats.hardest_n = local_stats.hardest_n;
             }
-            
             if (local_stats.max_peak > global_stats.max_peak) {
                 global_stats.max_peak = local_stats.max_peak;
             }
-            
             global_stats.overflow_count += local_stats.overflow_count;
             global_stats.fuse_count += local_stats.fuse_count;
             global_stats.cold_q1_triggers += local_stats.cold_q1_triggers;
@@ -805,47 +842,44 @@ int main(int argc, char** argv) {
             global_stats.cold_processing_time_ms += local_stats.cold_processing_time_ms;
         }
     }
+    //clock_gettime(CLOCK_MONOTONIC, &t_end);
+    //double elapsed_s = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
     
-    clock_gettime(CLOCK_MONOTONIC, &t_end);
-    double local_elapsed_s = (t_end.tv_sec - t_start.tv_sec) +
-                             (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
-    
-    // Aggregate results across ranks
-    uint64_t total_tested = 0;
-    uint64_t total_total_steps = 0;
-    uint64_t global_max_steps = 0;
-    double max_elapsed_s = 0.0;
-    
-    MPI_Reduce(&global_stats.tested, &total_tested, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.total_steps, &total_total_steps, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.max_steps_seen, &global_max_steps, 1, MPI_UINT64_T, MPI_MAX, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&local_elapsed_s, &max_elapsed_s, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-    
-    // Close logs
+    MPI_Barrier(MPI_COMM_WORLD);
+    double elapsed_s = MPI_Wtime() - t0;
+
+    double elapsed_max = 0.0;
+    MPI_Reduce(&elapsed_s, &elapsed_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+
+    // MPI reductions
+    uint64_t tested_total = 0, steps_total = 0, overflow_total = 0, fuse_total = 0;
+    uint64_t max_steps_global = 0;
+    MPI_Reduce(&global_stats.tested, &tested_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.total_steps, &steps_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.overflow_count, &overflow_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.fuse_count, &fuse_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.max_steps_seen, &max_steps_global, 1, MPI_UINT64_T, MPI_MAX, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
+        double throughput = tested_total / elapsed_max;
+        double avg_steps = (double)steps_total / tested_total;
+        std::cout << "\n=== V1.5-mpi-lean Results (MPI+OpenMP) ===\n";
+        std::cout << "MPI ranks:    " << size << "\n";
+        std::cout << "Threads/rank: " << num_threads << "\n";
+        std::cout << "Tested:       " << tested_total << " numbers\n";
+        std::cout << "Time:         " << (uint64_t)(elapsed_max * 1000) << " ms\n";
+        std::cout << "Throughput:   " << (uint64_t)throughput << " nums/sec\n";
+        std::cout << "Speedup:      " << (throughput / 2200000.0) << "× (vs 2.2M/s sequential)\n";
+        std::cout << "Avg steps:    " << avg_steps << "\n";
+        std::cout << "Max steps:    " << max_steps_global << "\n";
+        std::cout << "Overflows:    " << overflow_total << "\n";
+        std::cout << "Fuse hits:    " << fuse_total << "\n";
+        std::cout << "\n=== SUCCESS ===\n";
+    }
     if (g_overflow_log.is_open()) g_overflow_log.close();
     if (g_fuse_log.is_open()) g_fuse_log.close();
     if (g_cycle_log.is_open()) g_cycle_log.close();
     if (g_256bit_overflow_log.is_open()) g_256bit_overflow_log.close();
-    
-    // Root rank prints results
-    if (rank == 0) {
-        double throughput = total_tested / max_elapsed_s;
-        double avg_steps = (double)total_total_steps / total_tested;
-        
-        std::cout << "\n=== V1.6-mpi-openmp Results (MPI + OpenMP Hybrid) ===\n";
-        std::cout << "MPI ranks:    " << size << "\n";
-        std::cout << "Threads/rank: " << num_threads << "\n";
-        std::cout << "Total cores:  " << (size * num_threads) << "\n";
-        std::cout << "Tested:       " << total_tested << " numbers\n";
-        std::cout << "Time:         " << (uint64_t)(max_elapsed_s * 1000) << " ms\n";
-        std::cout << "Throughput:   " << (uint64_t)throughput << " nums/sec\n";
-        std::cout << "Speedup:      " << (throughput / 2200000.0) << "× (vs 2.2M/s sequential)\n";
-        std::cout << "Per-node:     " << (uint64_t)(throughput / size) << " nums/sec\n";
-        std::cout << "Avg steps:    " << avg_steps << "\n";
-        std::cout << "Max steps:    " << global_max_steps << "\n";
-        std::cout << "\n=== SUCCESS ===\n";
-    }
-    
     MPI_Finalize();
     return 0;
 }

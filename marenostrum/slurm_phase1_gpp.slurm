@@ -1,9 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=collatz_phase1_gpp
+#SBATCH --account=nct_352
+#SBATCH --qos=gp_debug
 #SBATCH --partition=gpp
 #SBATCH --nodes=2
-#SBATCH --ntasks=2
-#SBATCH --cpus-per-task=112
+#SBATCH --ntasks=4
+#SBATCH --cpus-per-task=56
 #SBATCH --time=00:15:00
 #SBATCH --output=collatz_phase1_%j.out
 #SBATCH --error=collatz_phase1_%j.err
@@ -28,7 +30,7 @@ echo "========================================="
 # Load required modules
 module purge
 module load intel/2023.2
-module load openmpi/4.1.5
+module load impi/2021.10
 
 # Environment setup
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
@@ -72,9 +74,9 @@ echo ""
 
 # Run the MPI program
 # Each MPI rank will spawn $OMP_NUM_THREADS threads
-# Total parallelism: 2 nodes × 112 threads = 224 parallel threads
+# Total parallelism: 2 nodes × 2 tasks × 56 threads = 224 parallel threads
 mpirun -np $SLURM_NTASKS \
-       --map-by ppr:1:node \
+       --map-by ppr:2:node \
        --bind-to none \
        ./collatz_mpi_gpp $START_SEED $END_SEED $OUTPUT_PREFIX
 

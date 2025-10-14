@@ -37,13 +37,22 @@ ssh nct01225@glogin1.bsc.es
 
 ---
 
-## 📂 Step 4: Extract & Prepare (30 seconds)
+## 📂 Step 4: Setup in SCRATCH Filesystem (1 minute)
+
+**IMPORTANT:** Don't run from `/gpfs/home` - use `/gpfs/scratch` instead!
 
 ```bash
-# Extract
-tar xzf collatz_mn5.tar.gz
+# Check your group name (e.g., bsc01, bsc32, etc.)
+groups
 
-# Navigate
+# Create workspace in SCRATCH (REPLACE bscXX with your group!)
+mkdir -p /gpfs/scratch/bscXX/nct01225/collatz
+cd /gpfs/scratch/bscXX/nct01225/collatz
+
+# Extract code here
+tar xzf ~/collatz_mn5.tar.gz
+
+# Navigate to marenostrum folder
 cd marenostrum/
 
 # Make scripts executable
@@ -51,9 +60,14 @@ chmod +x *.sh
 
 # Verify files
 ls -lh
+
+# Optional: Check disk quota
+bsc_quota
 ```
 
 **Expected:** See all your files (16 files, ~180KB total)
+
+**Why scratch?** Optimized for job I/O, much faster than home directory!
 
 ---
 
@@ -281,10 +295,28 @@ Now       → +1 min     Package & transfer
 ## 🚀 GO NOW!
 
 ```bash
+# 1. Package code
 cd ~/Desktop/MN25
 tar czf collatz_mn5.tar.gz marenostrum/
+
+# 2. Transfer
 scp collatz_mn5.tar.gz nct01225@glogin1.bsc.es:~/
+
+# 3. SSH
 ssh nct01225@glogin1.bsc.es
+
+# 4. Setup in SCRATCH (IMPORTANT!)
+groups  # Note your group name
+mkdir -p /gpfs/scratch/<YOUR_GROUP>/nct01225/collatz
+cd /gpfs/scratch/<YOUR_GROUP>/nct01225/collatz
+tar xzf ~/collatz_mn5.tar.gz
+cd marenostrum/
+
+# 5. Build and submit
+./build_phase1_gpp.sh
+sbatch slurm_phase1_gpp.slurm
 ```
 
 **You're 10 minutes away from running on a supercomputer! 💪**
+
+**See `MARENOSTRUM_FILESYSTEM.md` for detailed filesystem guide!**

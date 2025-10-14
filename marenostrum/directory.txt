@@ -1,0 +1,2 @@
+[nct01225@glogin1 marenostrum]$ pwd
+/gpfs/projects/nct_352/nct01225/collatz/marenostrum
