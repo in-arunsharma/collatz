@@ -141,7 +141,7 @@ struct uint256_t {
             limit.limbs[3] = 0x5555555555555555ULL;
             return limit;
         }();
-        return (*this > MAX_SAFE_256) || (*this == MAX_SAFE_256);
+        return *this > MAX_SAFE_256 || *this == MAX_SAFE_256;
     }
     
     std::string to_string() const {
@@ -586,52 +586,60 @@ CollatzResult compute_collatz_readonly(uint128_t n,
 }
 
 // ----- Cold queue processing (per-thread, non-parallel) -----
-
 static void process_cold_queue_fuse(std::deque<ColdQueueEntry>& queue, 
                                    ThreadStats& stats,
-                                   const uint32_t* /*memo_ptr unused*/) {
+                                   const uint32_t* memo_ptr) {
     if (queue.empty()) return;
-
+    
     struct timespec t_start, t_end;
     clock_gettime(CLOCK_MONOTONIC, &t_start);
-
-    std::deque<ColdQueueEntry> escalate_to_q2;   // *** NEW ***
-
+    
     for (const auto& entry : queue) {
         BrentResult brent = detect_cycle_brent_128(entry.seed, EXTENDED_FUSE);
-
+        
         if (brent.cycle_found) {
             stats.cold_q1_cycles_found++;
             log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
-        } else if (brent.overflow) {
-            // *** escalate to 256-bit Brent when 128-bit Brent overflows
-            escalate_to_q2.emplace_back(entry.seed, brent.steps, entry.peak_before_cold);
-        } else {
+        } else if (!brent.overflow) {
             stats.cold_q1_verified_ok++;
         }
     }
+    
     queue.clear();
-
-    // Run escalations with 256-bit Brent
-    for (const auto& e : escalate_to_q2) {
-        uint256_t seed_256(e.seed);
-        BrentResult br = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
-        if (br.cycle_found) {
-            stats.cold_q2_cycles_found++;
-            log_cycle_seed(e.seed, br.cycle_length, br.cycle_value);
-        } else if (br.overflow) {
-            stats.cold_q2_256bit_overflow++;
-            log_256bit_overflow(e.seed, br.steps);
-        } else {
-            stats.cold_q2_verified_ok++;
-        }
-    }
-
+    
     clock_gettime(CLOCK_MONOTONIC, &t_end);
     double elapsed = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
     stats.cold_processing_time_ms += elapsed * 1000;
 }
 
+static void process_cold_queue_overflow(std::deque<ColdQueueEntry>& queue,
+                                       ThreadStats& stats) {
+    if (queue.empty()) return;
+    
+    struct timespec t_start, t_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_start);
+    
+    for (const auto& entry : queue) {
+        uint256_t seed_256(entry.seed);
+        BrentResult brent = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
+        
+        if (brent.cycle_found) {
+            stats.cold_q2_cycles_found++;
+            log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
+        } else if (brent.overflow) {
+            stats.cold_q2_256bit_overflow++;
+            log_256bit_overflow(entry.seed, brent.steps);
+        } else {
+            stats.cold_q2_verified_ok++;
+        }
+    }
+    
+    queue.clear();
+    
+    clock_gettime(CLOCK_MONOTONIC, &t_end);
+    double elapsed = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
+    stats.cold_processing_time_ms += elapsed * 1000;
+}
 
 // ----- Mod-6 helpers -----
 static inline uint32_t mod3_u128(uint128_t n) {
@@ -652,52 +660,15 @@ static inline void align_start_and_delta(uint128_t &n, uint64_t &delta) {
     delta = (r3 == 1) ? 4 : 2;
 }
 
-
-static void process_cold_queue_overflow(std::deque<ColdQueueEntry>& queue,
-                                    ThreadStats& stats) {
-    if (queue.empty()) return;
-
-    struct timespec t_start, t_end;
-    clock_gettime(CLOCK_MONOTONIC, &t_start);
-
-    for (const auto& entry : queue) {
-        uint256_t seed_256(entry.seed);
-        BrentResult brent = detect_cycle_brent_256(seed_256, EXTENDED_FUSE);
-
-        if (brent.cycle_found) {
-            stats.cold_q2_cycles_found++;
-            log_cycle_seed(entry.seed, brent.cycle_length, brent.cycle_value);
-        } else if (brent.overflow) {
-            stats.cold_q2_256bit_overflow++;
-            log_256bit_overflow(entry.seed, brent.steps);
-        } else {
-            stats.cold_q2_verified_ok++;
-        }
-    }
-
-    queue.clear();
-
-    clock_gettime(CLOCK_MONOTONIC, &t_end);
-    double elapsed =
-        (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
-    stats.cold_processing_time_ms += elapsed * 1000.0;
-}
-
 // ----- Main driver -----
-int main(int argc, char** argv) 
-{
-
-
-   
+int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    if (argc < 3) 
-    {
-        if (rank == 0) 
-        {
+    if (argc < 3) {
+        if (rank == 0) {
             fprintf(stderr, "Usage: %s <start_offset> <count> [options]\n", argv[0]);
             fprintf(stderr, "Options:\n");
             fprintf(stderr, "  --threads <N>        Set number of OpenMP threads (default: all available)\n");
@@ -708,14 +679,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-
-
     uint64_t start_offset = std::stoull(argv[1]);
-    uint64_t count = std::stoull(argv[2]);
-    const char* run_tag = "v15mpi";
-    int num_threads = 0;
+    uint64_t count        = std::stoull(argv[2]);
+    const char* run_tag   = "v15mpi";
+    int num_threads       = 0;
 
-    bool enable_logs = true;
     for (int i = 3; i < argc; i++) {
         if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
             num_threads = std::stoi(argv[++i]);
@@ -723,179 +691,178 @@ int main(int argc, char** argv)
             SMALL_LIMIT_BITS = std::stoul(argv[++i]);
         } else if (strcmp(argv[i], "--tag") == 0 && i + 1 < argc) {
             run_tag = argv[++i];
-        } else if (strcmp(argv[i], "--no-logs") == 0) {
-            enable_logs = false;
         }
     }
+    if (num_threads > 0) omp_set_num_threads(num_threads);
+    else                 num_threads = omp_get_max_threads();
 
-
-    if (num_threads > 0) {
-        omp_set_num_threads(num_threads);
-    } else {
-        num_threads = omp_get_max_threads();
+    // (optional debug)
+    #pragma omp parallel
+    {
+        #pragma omp single
+        fprintf(stderr,"[RANK %d] omp_get_num_threads()=%d\n", rank, omp_get_num_threads());
     }
-
-    const char* dbg = getenv("COLLATZ_DEBUG");
-    if (dbg && *dbg=='1') {
-        #pragma omp parallel
-        { 
-            #pragma omp single
-            fprintf(stderr,"[RANK %d] omp_get_num_threads()=%d\n", rank, omp_get_num_threads());
-        }
+    {
         FILE* f = fopen("/proc/self/status","r");
         if (f) {
             char line[4096];
-            while (fgets(line,sizeof(line),f))
-            if (!strncmp(line,"Cpus_allowed_list",17)) 
-                { fprintf(stderr,"[RANK %d] %s", rank, line); 
-                    break; 
+            while (fgets(line,sizeof(line),f)) {
+                if (strncmp(line,"Cpus_allowed_list",17)==0) {
+                    fprintf(stderr,"[RANK %d] %s", rank, line);
+                    break;
                 }
+            }
             fclose(f);
         }
     }
 
-    
-
+    // Logs
     std::string tag_rank = std::string(run_tag) + "_r" + std::to_string(rank);
-    if (enable_logs) open_logs_once(tag_rank.c_str());
-    
-    
-    
+    //open_logs_once(tag_rank.c_str());
+
+    // Precompute memo
     small_limit = (1ULL << SMALL_LIMIT_BITS);
     memo.resize(small_limit, UNKNOWN);
     precompute_small_table();
     validate_memo_table();
+
+    // Prefault memo pages lightly
     volatile uint64_t prefault_sum = 0;
-    for (uint64_t i = 0; i < small_limit; i += 1024) {
-        prefault_sum += memo[i];
-    }
-    // Split work among ranks
+    for (uint64_t i = 0; i < small_limit; i += 1024) prefault_sum += memo[i];
+    (void)prefault_sum;
+
+    // Per-rank range
     uint64_t count_per = count / size;
-    uint64_t start_r = start_offset + rank * count_per;
-    uint64_t count_r = (rank == size - 1) ? (count - rank * count_per) : count_per;
-    uint128_t base = u128_from_u64(1) << 71;
+    uint64_t start_r   = start_offset + (uint64_t)rank * count_per;
+    uint64_t count_r   = (rank == size - 1) ? (count - (uint64_t)rank * count_per) : count_per;
+
+    uint128_t base  = u128_from_u64(1) << 71;
     uint128_t start = base + start_r;
-    uint128_t end = start + count_r;
-    
-    if (rank == 0) {
-        fprintf(stderr, "[MPI] size=%d\n", size);
-    }
-    
+    uint128_t end   = start + count_r;
 
-    
-    //fprintf(stderr, "[RANK %d] Testing %zu numbers\n", rank, numbers_to_test.size());
-    ThreadStats global_stats;
-    //struct timespec t_start, t_end;
+    uint64_t delta = 4;
+    align_start_and_delta(start, delta);
 
+    if (rank == 0) fprintf(stderr, "[MPI] size=%d\n", size);
+    fprintf(stderr, "[RANK %d] Scanning range with %d threads; ~%llu candidates\n",
+            rank, num_threads, (unsigned long long)(count_r/3));
 
+    ThreadStats global_stats{};
     const uint32_t* __restrict memo_ptr = memo.data();
 
+    // -------- BATCHED EXECUTION (fixes OOM) --------
+    static const size_t BATCH_CAP = 16'000'000; // ~256 MB (16 bytes * 16M)
+    std::vector<uint128_t> numbers_to_test;
+    numbers_to_test.reserve(BATCH_CAP);
+
+    uint128_t n_fill = start;
+    uint64_t  d_fill = delta;
 
     MPI_Barrier(MPI_COMM_WORLD);
     double t0 = MPI_Wtime();
 
-    uint128_t first_local = start;
-    uint128_t last_local  = count_r ? (start + (count_r - 1)) : start;
-    uint64_t last_hi = (uint64_t)(last_local >> 64), last_lo = (uint64_t)last_local;
-    uint64_t first_hi = (uint64_t)(first_local >> 64), first_lo = (uint64_t)first_local;
-
-    fprintf(stderr, "[RANK %d] Scanning [%s, %s) with %d threads\n",
-            rank,
-            to_string_u128(start).c_str(),
-            to_string_u128(end).c_str(),
-            num_threads);
-
-    fprintf(stderr, "[RANK %d] ~%llu candidates\n",
-            rank,
-            (unsigned long long)(count_r / 3));
-    
-
-    #pragma omp parallel
-{
-    ThreadStats local_stats;
-    std::deque<ColdQueueEntry> local_cold_q1, local_cold_q2;
-
-    // Iterate candidate index j, map to n_j in O(1) without mod checks.
-    #pragma omp for schedule(static,16384)
-    for (uint64_t j = 0; j < J; ++j) {
-        uint64_t m = j >> 1;  // j/2
-        uint128_t n = start + (uint128_t)6 * m
-                      + ( (j & 1ULL) ? (uint128_t)odd_off : (uint128_t)0 );
-
-        CollatzResult res = compute_collatz_readonly(n, memo_ptr, small_limit, SAFETY_FUSE);
-
-        local_stats.tested++;
-        local_stats.total_steps += res.steps;
-        if (res.steps > local_stats.max_steps_seen) { local_stats.max_steps_seen = res.steps; local_stats.hardest_n = n; }
-        if (res.peak  > local_stats.max_peak)       { local_stats.max_peak = res.peak; }
-
-        if (res.overflow) {
-            local_stats.overflow_count++;
-            local_stats.cold_q2_triggers++;
-            local_cold_q2.emplace_back(n, res.steps, res.peak);
-            log_overflow_seed(n, res.steps, res.peak);
-        } else if (res.steps >= SAFETY_FUSE) {
-            local_stats.fuse_count++;
-            local_stats.cold_q1_triggers++;
-            local_cold_q1.emplace_back(n, res.steps, res.peak);
-            log_fuse_seed(n, res.steps);
+    while (n_fill < end) {
+        numbers_to_test.clear();
+        // Fill one batch following the 2/4 delta pattern (skips evens & multiples of 3)
+        while (n_fill < end && numbers_to_test.size() < BATCH_CAP) {
+            numbers_to_test.push_back(n_fill);
+            n_fill += d_fill;
+            d_fill ^= 6; // toggle 2 <-> 4
         }
 
-        if (local_stats.tested % COLD_BATCH_SIZE == 0 ||
-            local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE ||
-            local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
+        #pragma omp parallel
+        {
+            ThreadStats local_stats{};
+            std::deque<ColdQueueEntry> local_cold_q1;
+            std::deque<ColdQueueEntry> local_cold_q2;
+
+            #pragma omp for schedule(guided, 8192)
+            for (size_t idx = 0; idx < numbers_to_test.size(); ++idx) {
+                uint128_t n = numbers_to_test[idx];
+                CollatzResult res = compute_collatz_readonly(n, memo_ptr, small_limit, SAFETY_FUSE);
+
+                local_stats.tested++;
+                local_stats.total_steps += res.steps;
+                if (res.steps > local_stats.max_steps_seen) {
+                    local_stats.max_steps_seen = res.steps;
+                    local_stats.hardest_n = n;
+                }
+                if (res.peak > local_stats.max_peak) local_stats.max_peak = res.peak;
+
+                if (res.overflow) {
+                    local_stats.overflow_count++;
+                    local_stats.cold_q2_triggers++;
+                    local_cold_q2.emplace_back(n, res.steps, res.peak);
+                    log_overflow_seed(n, res.steps, res.peak);
+                } else if (res.steps >= SAFETY_FUSE) {
+                    local_stats.fuse_count++;
+                    local_stats.cold_q1_triggers++;
+                    local_cold_q1.emplace_back(n, res.steps, res.peak);
+                    log_fuse_seed(n, res.steps);
+                }
+
+                if (local_stats.tested % COLD_BATCH_SIZE == 0 ||
+                    local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE ||
+                    local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
+                    process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
+                    process_cold_queue_overflow(local_cold_q2, local_stats);
+                }
+            }
+
+            // Flush leftovers for this batch
             process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
             process_cold_queue_overflow(local_cold_q2, local_stats);
-        }
-    }
 
-    process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
-    process_cold_queue_overflow(local_cold_q2, local_stats);
+            #pragma omp critical
+            {
+                global_stats.tested += local_stats.tested;
+                global_stats.total_steps += local_stats.total_steps;
+                if (local_stats.max_steps_seen > global_stats.max_steps_seen) {
+                    global_stats.max_steps_seen = local_stats.max_steps_seen;
+                    global_stats.hardest_n = local_stats.hardest_n;
+                }
+                if (local_stats.max_peak > global_stats.max_peak) {
+                    global_stats.max_peak = local_stats.max_peak;
+                }
+                global_stats.overflow_count += local_stats.overflow_count;
+                global_stats.fuse_count += local_stats.fuse_count;
+                global_stats.cold_q1_triggers += local_stats.cold_q1_triggers;
+                global_stats.cold_q1_cycles_found += local_stats.cold_q1_cycles_found;
+                global_stats.cold_q1_verified_ok += local_stats.cold_q1_verified_ok;
+                global_stats.cold_q2_triggers += local_stats.cold_q2_triggers;
+                global_stats.cold_q2_cycles_found += local_stats.cold_q2_cycles_found;
+                global_stats.cold_q2_256bit_overflow += local_stats.cold_q2_256bit_overflow;
+                global_stats.cold_q2_verified_ok += local_stats.cold_q2_verified_ok;
+                global_stats.cold_processing_time_ms += local_stats.cold_processing_time_ms;
+            }
+        } // end omp parallel (batch)
+    } // end batches
 
-        #pragma omp critical
-        {
-            global_stats.tested += local_stats.tested;
-            global_stats.total_steps += local_stats.total_steps;
-            if (local_stats.max_steps_seen > global_stats.max_steps_seen) {
-                global_stats.max_steps_seen = local_stats.max_steps_seen;
-                global_stats.hardest_n = local_stats.hardest_n;
-            }
-            if (local_stats.max_peak > global_stats.max_peak) {
-                global_stats.max_peak = local_stats.max_peak;
-            }
-            global_stats.overflow_count += local_stats.overflow_count;
-            global_stats.fuse_count += local_stats.fuse_count;
-            global_stats.cold_q1_triggers += local_stats.cold_q1_triggers;
-            global_stats.cold_q1_cycles_found += local_stats.cold_q1_cycles_found;
-            global_stats.cold_q1_verified_ok += local_stats.cold_q1_verified_ok;
-            global_stats.cold_q2_triggers += local_stats.cold_q2_triggers;
-            global_stats.cold_q2_cycles_found += local_stats.cold_q2_cycles_found;
-            global_stats.cold_q2_256bit_overflow += local_stats.cold_q2_256bit_overflow;
-            global_stats.cold_q2_verified_ok += local_stats.cold_q2_verified_ok;
-            global_stats.cold_processing_time_ms += local_stats.cold_processing_time_ms;
-        }
-    }
-    //clock_gettime(CLOCK_MONOTONIC, &t_end);
-    //double elapsed_s = (t_end.tv_sec - t_start.tv_sec) + (t_end.tv_nsec - t_start.tv_nsec) * 1e-9;
-    
     MPI_Barrier(MPI_COMM_WORLD);
     double elapsed_s = MPI_Wtime() - t0;
+    // -------- end batched execution --------
 
+    // MPI reductions
     double elapsed_max = 0.0;
     MPI_Reduce(&elapsed_s, &elapsed_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
-
-    // MPI reductions
     uint64_t tested_total = 0, steps_total = 0, overflow_total = 0, fuse_total = 0;
     uint64_t max_steps_global = 0;
-    MPI_Reduce(&global_stats.tested, &tested_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.total_steps, &steps_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.overflow_count, &overflow_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.fuse_count, &fuse_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
-    MPI_Reduce(&global_stats.max_steps_seen, &max_steps_global, 1, MPI_UINT64_T, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.tested,        &tested_total,     1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.total_steps,   &steps_total,      1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.overflow_count,&overflow_total,   1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.fuse_count,    &fuse_total,       1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.max_steps_seen,&max_steps_global, 1, MPI_UINT64_T, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    uint128_t task_end = (u128_from_u64(1) << 71) + (uint128_t)start_offset + (uint128_t)count; // [ .. , task_end )
+    uint128_t last_candidate = task_end - 1;
+    while ( ((uint64_t)last_candidate & 1ULL) == 0 || (mod3_u128(last_candidate) == 0) ) {
+        last_candidate--;
+    }
+
     if (rank == 0) {
         double throughput = tested_total / elapsed_max;
-        double avg_steps = (double)steps_total / tested_total;
+        double avg_steps  = tested_total ? (double)steps_total / tested_total : 0.0;
         std::cout << "\n=== V1.5-mpi-lean Results (MPI+OpenMP) ===\n";
         std::cout << "MPI ranks:    " << size << "\n";
         std::cout << "Threads/rank: " << num_threads << "\n";
@@ -907,48 +874,15 @@ int main(int argc, char** argv)
         std::cout << "Max steps:    " << max_steps_global << "\n";
         std::cout << "Overflows:    " << overflow_total << "\n";
         std::cout << "Fuse hits:    " << fuse_total << "\n";
+        std::cout << "Last candidate: ";
+        print_u128(last_candidate);
         std::cout << "\n=== SUCCESS ===\n";
     }
-    if (g_overflow_log.is_open()) g_overflow_log.close();
-    if (g_fuse_log.is_open()) g_fuse_log.close();
-    if (g_cycle_log.is_open()) g_cycle_log.close();
+
+    if (g_overflow_log.is_open())      g_overflow_log.close();
+    if (g_fuse_log.is_open())          g_fuse_log.close();
+    if (g_cycle_log.is_open())         g_cycle_log.close();
     if (g_256bit_overflow_log.is_open()) g_256bit_overflow_log.close();
-
-
-
-
-
-
-
-    std::vector<uint64_t> all_last_hi, all_last_lo, all_first_hi, all_first_lo;
-    if (rank == 0) {
-        all_last_hi.resize(size); all_last_lo.resize(size);
-        all_first_hi.resize(size); all_first_lo.resize(size);
-    }
-    MPI_Gather(&last_hi,  1, MPI_UINT64_T, rank==0?all_last_hi.data():nullptr,  1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-    MPI_Gather(&last_lo,  1, MPI_UINT64_T, rank==0?all_last_lo.data():nullptr,  1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-    MPI_Gather(&first_hi, 1, MPI_UINT64_T, rank==0?all_first_hi.data():nullptr, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-    MPI_Gather(&first_lo, 1, MPI_UINT64_T, rank==0?all_first_lo.data():nullptr, 1, MPI_UINT64_T, 0, MPI_COMM_WORLD);
-
-    if (rank == 0) 
-    {
-        auto make128 = [](uint64_t hi, uint64_t lo)->__uint128_t { return ((__uint128_t)hi<<64) | lo; };
-        uint128_t global_first = 0, global_last = 0;
-        for (int r=0; r<size; ++r) 
-        {
-            uint128_t f = make128(all_first_hi[r], all_first_lo[r]);
-            uint128_t l = make128(all_last_hi[r],  all_last_lo[r]);
-            if (r==0 || f < global_first) global_first = f;
-            if (r==0 || l > global_last)  global_last  = l;
-        }
-        // write a compact summary you can grep later
-        std::ofstream prog(("progress_" + std::string(run_tag) + ".txt").c_str(), std::ios::app);
-        if (prog) {
-            prog << "first_tested "; prog << to_string_u128(global_first)
-                << "  last_tested "; prog << to_string_u128(global_last) << "\n";
-        }
-    }
-
 
     MPI_Finalize();
     return 0;
