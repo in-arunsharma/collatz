@@ -32,7 +32,8 @@ export OMP_PROC_BIND=close
 COUNT=$((1<<42))                    # numbers per array task (raw range length)
 : "${ARRAY_BASE_INDEX:=0}"          # set to 250, 500, ... on later waves
 TASK_INDEX=$((ARRAY_BASE_INDEX + SLURM_ARRAY_TASK_ID))
-START=$((TASK_INDEX * COUNT))
+START_BASE=158329674399744  
+START=$((START_BASE + TASK_INDEX * COUNT))
 TAG="v15mpi.${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 
 # Run (program already adds base 2^71 internally)

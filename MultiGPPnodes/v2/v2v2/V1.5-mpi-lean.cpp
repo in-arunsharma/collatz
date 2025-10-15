@@ -854,6 +854,11 @@ int main(int argc, char** argv) {
     MPI_Reduce(&global_stats.fuse_count,    &fuse_total,       1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
     MPI_Reduce(&global_stats.max_steps_seen,&max_steps_global, 1, MPI_UINT64_T, MPI_MAX, 0, MPI_COMM_WORLD);
 
+
+    uint64_t cyc128_total = 0, cyc256_total = 0;
+    MPI_Reduce(&global_stats.cold_q1_cycles_found, &cyc128_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&global_stats.cold_q2_cycles_found, &cyc256_total, 1, MPI_UINT64_T, MPI_SUM, 0, MPI_COMM_WORLD);
+
     uint128_t task_end = (u128_from_u64(1) << 71) + (uint128_t)start_offset + (uint128_t)count; // [ .. , task_end )
     uint128_t last_candidate = task_end - 1;
     while ( ((uint64_t)last_candidate & 1ULL) == 0 || (mod3_u128(last_candidate) == 0) ) {
@@ -873,6 +878,8 @@ int main(int argc, char** argv) {
         std::cout << "Avg steps:    " << avg_steps << "\n";
         std::cout << "Max steps:    " << max_steps_global << "\n";
         std::cout << "Overflows:    " << overflow_total << "\n";
+        std::cout << "Cycles 128-bit Brent: " << cyc128_total << "\n";   // NEW
+        std::cout << "Cycles 256-bit Brent: " << cyc256_total << "\n";
         std::cout << "Fuse hits:    " << fuse_total << "\n";
         std::cout << "Last candidate: ";
         print_u128(last_candidate);
