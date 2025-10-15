@@ -25,7 +25,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
-//#include <time.h>
+#include <time.h>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -141,7 +141,7 @@ struct uint256_t {
             limit.limbs[3] = 0x5555555555555555ULL;
             return limit;
         }();
-        return *this > MAX_SAFE_256;
+        return (*this > MAX_SAFE_256) || (*this == MAX_SAFE_256);
     }
     
     std::string to_string() const {
@@ -776,28 +776,14 @@ int main(int argc, char** argv)
     uint128_t base = u128_from_u64(1) << 71;
     uint128_t start = base + start_r;
     uint128_t end = start + count_r;
-    uint64_t delta = 4;
-    align_start_and_delta(start, delta);
+    
     if (rank == 0) {
         fprintf(stderr, "[MPI] size=%d\n", size);
     }
-    fprintf(stderr, "[RANK %d] Scanning [%s, %s) with %d threads\n",
-        rank,
-        to_string_u128(start).c_str(),
-        to_string_u128(end).c_str(),
-        num_threads);
+    
 
-    std::vector<uint128_t> numbers_to_test;
-    {
-        uint128_t n = start;
-        uint64_t current_delta = delta;
-        while (n < end) {
-            numbers_to_test.push_back(n);
-            n += current_delta;
-            current_delta ^= 6;
-        }
-    }
-    fprintf(stderr, "[RANK %d] Testing %zu numbers\n", rank, numbers_to_test.size());
+    
+    //fprintf(stderr, "[RANK %d] Testing %zu numbers\n", rank, numbers_to_test.size());
     ThreadStats global_stats;
     //struct timespec t_start, t_end;
 
@@ -808,32 +794,42 @@ int main(int argc, char** argv)
     MPI_Barrier(MPI_COMM_WORLD);
     double t0 = MPI_Wtime();
 
-    uint128_t first_local = numbers_to_test.empty() ? 0 : numbers_to_test.front();
-    uint128_t last_local  = numbers_to_test.empty() ? 0 : numbers_to_test.back();
+    uint128_t first_local = start;
+    uint128_t last_local  = count_r ? (start + (count_r - 1)) : start;
     uint64_t last_hi = (uint64_t)(last_local >> 64), last_lo = (uint64_t)last_local;
     uint64_t first_hi = (uint64_t)(first_local >> 64), first_lo = (uint64_t)first_local;
 
+    fprintf(stderr, "[RANK %d] Scanning [%s, %s) with %d threads\n",
+            rank,
+            to_string_u128(start).c_str(),
+            to_string_u128(end).c_str(),
+            num_threads);
 
+    fprintf(stderr, "[RANK %d] ~%llu candidates\n",
+            rank,
+            (unsigned long long)(count_r / 3));
     
 
     #pragma omp parallel
     {
         ThreadStats local_stats;
-        std::deque<ColdQueueEntry> local_cold_q1;
-        std::deque<ColdQueueEntry> local_cold_q2;
+        std::deque<ColdQueueEntry> local_cold_q1, local_cold_q2;
+
         #pragma omp for schedule(guided, 8192)
-        for (size_t idx = 0; idx < numbers_to_test.size(); idx++) {
-            uint128_t n = numbers_to_test[idx];
+        for (uint64_t i = 0; i < count_r; ++i) {
+            uint128_t n = start + i;
+
+            // filter: odd and not divisible by 3
+            if ( ( (uint64_t)n & 1ULL ) == 0 ) continue;
+            if (mod3_u128(n) == 0)       continue;
+
             CollatzResult res = compute_collatz_readonly(n, memo_ptr, small_limit, SAFETY_FUSE);
+
             local_stats.tested++;
             local_stats.total_steps += res.steps;
-            if (res.steps > local_stats.max_steps_seen) {
-                local_stats.max_steps_seen = res.steps;
-                local_stats.hardest_n = n;
-            }
-            if (res.peak > local_stats.max_peak) {
-                local_stats.max_peak = res.peak;
-            }
+            if (res.steps > local_stats.max_steps_seen) { local_stats.max_steps_seen = res.steps; local_stats.hardest_n = n; }
+            if (res.peak  > local_stats.max_peak)       { local_stats.max_peak = res.peak; }
+
             if (res.overflow) {
                 local_stats.overflow_count++;
                 local_stats.cold_q2_triggers++;
@@ -845,13 +841,18 @@ int main(int argc, char** argv)
                 local_cold_q1.emplace_back(n, res.steps, res.peak);
                 log_fuse_seed(n, res.steps);
             }
-            if (local_stats.tested % COLD_BATCH_SIZE == 0 || local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE || local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
+
+            if (local_stats.tested % COLD_BATCH_SIZE == 0 ||
+                local_cold_q1.size() >= MAX_COLD_QUEUE_SIZE ||
+                local_cold_q2.size() >= MAX_COLD_QUEUE_SIZE) {
                 process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
                 process_cold_queue_overflow(local_cold_q2, local_stats);
             }
         }
+
         process_cold_queue_fuse(local_cold_q1, local_stats, memo_ptr);
         process_cold_queue_overflow(local_cold_q2, local_stats);
+
         #pragma omp critical
         {
             global_stats.tested += local_stats.tested;

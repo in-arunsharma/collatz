@@ -12,7 +12,7 @@
 #SBATCH --qos=gp_debug
 #SBATCH --account=nct_352
 
-#SBATCH --array=0-10%1
+#SBATCH --array=0-350%1
 
 module purge
 module load intel impi/2021.10.0   # same stack as you used to build
