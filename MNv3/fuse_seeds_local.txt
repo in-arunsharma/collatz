@@ -1,1 +1,0 @@
-# Fuse-hit seeds - V1.5-openmp
