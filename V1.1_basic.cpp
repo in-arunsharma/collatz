@@ -36,10 +36,14 @@ int main() {
     
     long long counterexamples_found = 0;
     long long numbers_tested = 0;
+    int steps = 0;
     
     // Test with some small numbers first  
     for (long long i = 1000000; i <= 2000000; i++) {  // Reduced for testing with cycle detection
-        int steps = collatz_steps(i);
+        if (i % 2 != 0) 
+        {
+            steps = collatz_steps(i);
+        }
         numbers_tested++;
         
         if (steps == -1) {  // Cycle detected!
