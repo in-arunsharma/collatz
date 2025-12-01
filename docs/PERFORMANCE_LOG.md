@@ -29,6 +29,9 @@
 | V1_openmp | OpenMP dynamic scheduling | 0,465 | 2150537634 | **39,380x** | 7.84x | 11.9 cores | 22.137.396.166 | 49.911.408.051 | 8.319.472.796 | 73.641.038 | 2.25 | 0.89% |
 | V2_static | OpenMP static scheduling | 0,462 | 2164502164 | **39,637x** | 7.89x | 11.9 cores | 22.085.074.329 | 49.754.286.973 | 8.322.212.421 | 70.870.877 | 2.25 | 0.85% |
 | V3_guided | OpenMP guided scheduling | 0,462 | 2164502164 | **39,637x** | 7.89x | 11.9 cores | 21.939.618.031 | 49.910.696.911 | 8.319.278.346 | 71.468.345 | 2.27 | 0.86% |
+| V4_reduction | OpenMP reduction (no critical) | 0,469 | 2132196162 | **39,046x** | 7.75x | 11.9 cores | 22.355.137.415 | 50.088.822.994 | 8.322.556.136 | 75.174.209 | 2.24 | 0.90% |
+| V5_cache_aligned | Cache-aligned thread data | 0,492 | 2032520325 | **37,213x** | 7.39x | 11.9 cores | 23.479.644.514 | 50.923.977.825 | 8.156.411.539 | 82.278.914 | 2.17 | 1.01% |
+| V6_atomic | Atomic lock-free operations | 0,468 | 2136752136 | **39,130x** | 7.77x | 11.9 cores | 22.263.870.807 | 50.090.716.841 | 8.323.098.406 | 70.316.913 | 2.25 | 0.84% |
 
 ### GPU Acceleration (03_gpu/)
 
@@ -162,19 +165,76 @@
 - Hardware efficiency: 21.9B cycles, 49.9B instructions (fewest cycles!)
 - IPC: 49.9B / 21.9B = 2.27 instructions per cycle (best IPC)
 - Branch efficiency: 71.5M misses / 8.32B branches = 0.86% miss rate
+### V4_reduction - OpenMP Reduction Optimization
+- **Eliminated critical section** for total_steps, numbers_tested, cycles_found
+- Used OpenMP `reduction(+:...)` clause for automatic thread-local aggregation
+- Only one critical section remains for max_steps update
+- Performance: 469ms = 2.13B range/sec
+- Speedup vs V7: 7.75x
+- **Result: 7ms SLOWER than V2_static (469ms vs 462ms)**
+- Why slower? OpenMP reduction has implicit synchronization overhead
+- Hardware: 22.4B cycles (vs 22.1B in V2), 50.1B instructions
+- Conclusion: For rare critical sections (12 calls total), the lock is cheaper than reduction overhead
+
+### V5_cache_aligned - Cache-Aligned Thread Data
+- **Cache line alignment** with `alignas(64)` to prevent false sharing
+- Each thread writes to its own 64-byte aligned structure
+- Sequential reduction after parallel work (no locks during computation)
+- Performance: 492ms = 2.03B range/sec
+- Speedup vs V7: 7.39x
+- **Result: 30ms SLOWER than V2_static (492ms vs 462ms)**
+- Why slower? 
+  * Padding increases memory footprint (12 threads × 64 bytes = 768 bytes)
+  * Additional memory accesses for array indexing
+  * False sharing wasn't the bottleneck (critical section called only 12 times)
+- Hardware: 23.5B cycles (vs 22.1B), worse branch prediction (1.01% vs 0.85%)
+- Conclusion: Over-engineering for this workload - false sharing requires frequent writes
+
+### V6_atomic - Lock-Free Atomic Operations
+- **Atomic operations** with `compare_exchange_weak` for lock-free max updates
+- Replaced `#pragma omp critical` with atomic CAS loop
+- Uses `memory_order_relaxed` for minimal overhead
+- Performance: 468ms = 2.14B range/sec
+- Speedup vs V7: 7.77x
+- **Result: 6ms SLOWER than V2_static (468ms vs 462ms)**
+- Why comparable? Atomic CAS has similar overhead to mutex for 12 operations
+- Hardware: 22.3B cycles, 2.25 IPC, 0.84% branch-miss (best branch prediction!)
+- Conclusion: Lock-free doesn't help when contention is negligible
+
 ### Multi-threading Key Insights
 - **Parallel efficiency:** 66% (7.89x speedup with 12 threads)
-- **Performance comparison:**
-  * V1_openmp (dynamic): 465ms, 2.25 IPC, 0.89% branch-miss
-  * V2_static (static): 462ms, 2.25 IPC, 0.85% branch-miss ← Best branch prediction
-  * V3_guided (guided): 462ms, 2.27 IPC, 0.86% branch-miss ← Best IPC
-- **All three perform identically** (462-465ms) because workload is perfectly balanced
-- **Bottlenecks:** 
-  * Thread synchronization overhead (`#pragma omp critical`)
-  * Cache contention between cores
+- **Performance ranking:**
+  1. **V2_static / V3_guided: 462ms** ← Optimal (tied)
+  2. V1_openmp: 465ms (+3ms scheduling overhead)
+  3. V6_atomic: 468ms (+6ms atomic CAS overhead)
+  4. V4_reduction: 469ms (+7ms reduction overhead)
+  5. V5_cache_aligned: 492ms (+30ms memory alignment overhead)
+  
+- **Critical finding:** All "optimizations" made performance WORSE
+  * V2_static already optimal - simple critical section is fastest
+  * Critical section called only 12 times (once per thread) - negligible cost
+  * False sharing is NOT a bottleneck (threads rarely synchronize)
+  * Atomic operations have overhead similar to mutexes at low contention
+  
+- **Why optimizations failed:**
+  * **V4 reduction:** OpenMP reduction adds implicit barriers and synchronization
+  * **V5 cache-aligned:** Memory overhead exceeds false sharing cost (which is ~0)
+  * **V6 atomic:** CAS loop has retry overhead, mutex is cheaper for 12 operations
+  
+- **Bottlenecks (real):** 
+  * Compute-bound workload (Collatz steps dominate runtime)
+  * Memory bandwidth (12 threads × L1 cache miss rate)
+  * IPC limit (~2.25 on this CPU)
+  * NOT synchronization (critical section < 0.1% of runtime)
+  
+- **Why not 12x speedup:** 
+  * Hyperthreading efficiency: 6 physical cores, not 12
   * Memory bandwidth saturation
-- **Why not 12x speedup:** OpenMP runtime overhead, false sharing, atomic operations
-- **Best strategy:** Static or guided scheduling for balanced workloads (dynamic adds 3ms overhead)
+  * OpenMP runtime overhead (thread creation, scheduling)
+  * Cache coherency traffic between cores
+  
+- **Lesson:** Don't optimize what's not slow. Profiling shows compute > sync by 1000:1 ratio.
+  **V2_static is the CPU limit** - further gains require GPU or better algorithm.
   * Cache contention between cores
   * Memory bandwidth saturation
 - **Why not 12x speedup:** OpenMP runtime overhead, false sharing, atomic operations
