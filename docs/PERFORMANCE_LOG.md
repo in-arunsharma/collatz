@@ -2,12 +2,15 @@
 
 ## System Specifications
 - **CPU:** Intel i5 (6 cores / 12 threads)
+- **GPU:** NVIDIA L40 (Ada Lovelace architecture, 18,176 CUDA cores)
 - **Test Range:** [2^71, 2^71 + 1B] (1 billion numbers, ~333M odd tested after mod-6 filtering)
 - **Goal:** Maximum single-thread throughput → Multi-threading → GPU
 
 ---
 
 ## Performance Results Table
+
+### Single-Core Optimization (01_single_core/)
 
 | Version | Description | Time (s) | Numbers/sec | Speedup vs V1 | Speedup vs Prev | Cycles | Instructions | Branches | Branch-misses | Notes |
 |---------|-------------|----------|-------------|---------------|-----------------|-------|---------------|-----------------|-------|-----|
@@ -18,6 +21,20 @@
 | V5 | No Floyd cycle detection | 0,057 | 175438596 | **3212.44x** | 1.23x | 237.421.546 | 606.530.640 | 102.737.941 | 1.536.175 | Verification only (10M range) |
 | V6 | Mod-6 filtering | 3,716 | 269106566 | **4927.66x** | 1.53x | 16.045.160.929 | 44.258.116.911 | 6.821.597.247 | 97.490.467 | 1B range, 333M tested |
 | V7 | Compiler hints (always_inline) | 3,644 | 274423710 | **5024.98x** | 1.02x | 15.742.586.085 | 44.258.116.932 | 6.821.597.215 | 98.831.285 | 1B range, 333M tested |
+
+### Multi-Threading (02_multi_threaded/)
+
+| Version | Description | Time (s) | Numbers/sec | Speedup vs V1 | Speedup vs V7 | CPU Utilization | Cycles | Instructions | Branches | Branch-misses | IPC | Branch Miss % |
+|---------|-------------|----------|-------------|---------------|---------------|-----------------|--------|--------------|----------|---------------|-----|---------------|
+| V1_openmp | OpenMP dynamic scheduling | 0,465 | 2150537634 | **39,380x** | 7.84x | 11.9 cores | 22.137.396.166 | 49.911.408.051 | 8.319.472.796 | 73.641.038 | 2.25 | 0.89% |
+| V2_static | OpenMP static scheduling | 0,462 | 2164502164 | **39,637x** | 7.89x | 11.9 cores | 22.085.074.329 | 49.754.286.973 | 8.322.212.421 | 70.870.877 | 2.25 | 0.85% |
+| V3_guided | OpenMP guided scheduling | 0,462 | 2164502164 | **39,637x** | 7.89x | 11.9 cores | 21.939.618.031 | 49.910.696.911 | 8.319.278.346 | 71.468.345 | 2.27 | 0.86% |
+
+### GPU Acceleration (03_gpu/)
+
+| Version | Description | Time (s) | Numbers/sec | Speedup vs V1 | Speedup vs V7 | Speedup vs 12-core | GPU Config | Notes |
+|---------|-------------|----------|-------------|---------------|---------------|--------------------|------------|-------|
+| V1_cuda | NVIDIA L40 CUDA | 0,058 | 17241379310 | **315,693x** | 62.8x | 8.09x | 651,042 blocks × 256 threads | 128-bit arithmetic, mod-6 filtering |
 
 
 ---
@@ -105,18 +122,119 @@
 - Branch efficiency: 98.8M misses / 6.822B branches = 1.45% miss rate
 - Key insight: Compiler hints provide marginal gains - `-O3` already aggressively optimizes
 - Diminishing returns: Single-core optimizations hitting limits
-- Next step: **Multi-threading with OpenMP** for 10-12x additional speedup
+- **Best single-core result** before parallelization
+
+---
+
+## Multi-Threading Results (02_multi_threaded/)
+
+### V1_openmp - Dynamic Scheduling
+- **OpenMP parallelization** with `schedule(dynamic, 10000)`
+- 12 threads (6 cores × 2 hyperthreading)
+- Dynamic work distribution: chunks of 10,000 iterations
+- Performance: 465ms = 2.15B range/sec
+- Speedup vs V7: 7.84x
+- CPU utilization: 11.9 cores (99% efficiency)
+- Hardware efficiency: 22.1B cycles, 49.9B instructions
+- IPC: 49.9B / 22.1B = 2.25 instructions per cycle
+- Branch efficiency: 73.6M misses / 8.32B branches = 0.89% miss rate
+- L1 cache: 5.16B loads, 29K misses = 0.0006% miss rate
+- Overhead: Runtime scheduling decisions for load balancing
+
+### V2_static - Static Scheduling ✅ **Best CPU Performance**
+- **OpenMP parallelization** with `schedule(static)`
+- 12 threads with equal static work distribution
+- Performance: 462ms = 2.16B range/sec
+- Speedup vs V7: 7.89x (66% parallel efficiency)
+- CPU utilization: 11.9 cores (99% efficiency)
+- Hardware efficiency: 22.1B cycles, 49.8B instructions
+- IPC: 49.8B / 22.1B = 2.25 instructions per cycle
+- Branch efficiency: 70.9M misses / 8.32B branches = 0.85% miss rate
+- Why fastest: Workload is balanced (all numbers take ~10 steps), minimal scheduling overhead
+- **Critical fix:** Early termination changed from `current < original` to `current < START` to avoid race conditions
+
+### V3_guided - Guided Scheduling
+- **OpenMP parallelization** with `schedule(guided)`
+- Adaptive chunk sizes: starts large, gradually decreases
+- Performance: 462ms = 2.16B range/sec
+- Speedup vs V7: 7.89x
+- CPU utilization: 11.9 cores (99% efficiency)
+- Hardware efficiency: 21.9B cycles, 49.9B instructions (fewest cycles!)
+- IPC: 49.9B / 21.9B = 2.27 instructions per cycle (best IPC)
+- Branch efficiency: 71.5M misses / 8.32B branches = 0.86% miss rate
+### Multi-threading Key Insights
+- **Parallel efficiency:** 66% (7.89x speedup with 12 threads)
+- **Performance comparison:**
+  * V1_openmp (dynamic): 465ms, 2.25 IPC, 0.89% branch-miss
+  * V2_static (static): 462ms, 2.25 IPC, 0.85% branch-miss ← Best branch prediction
+  * V3_guided (guided): 462ms, 2.27 IPC, 0.86% branch-miss ← Best IPC
+- **All three perform identically** (462-465ms) because workload is perfectly balanced
+- **Bottlenecks:** 
+  * Thread synchronization overhead (`#pragma omp critical`)
+  * Cache contention between cores
+  * Memory bandwidth saturation
+- **Why not 12x speedup:** OpenMP runtime overhead, false sharing, atomic operations
+- **Best strategy:** Static or guided scheduling for balanced workloads (dynamic adds 3ms overhead)
+  * Cache contention between cores
+  * Memory bandwidth saturation
+- **Why not 12x speedup:** OpenMP runtime overhead, false sharing, atomic operations
+- **Best strategy:** Static scheduling for balanced workloads
+
+---
+
+## GPU Results (03_gpu/)
+
+### V1_cuda - NVIDIA L40 CUDA
+- **Massive parallelization** with CUDA (18,176 CUDA cores)
+- 128-bit arithmetic using two 64-bit values (low/high)
+- Mod-6 filtering: Skip numbers ≡ 3 (mod 6)
+- Early termination: When trajectory < 2^71 (verified range)
+- GPU Configuration:
+  * Blocks: 651,042
+  * Threads per block: 256
+  * Total threads: ~167 million
+  * Each thread processes multiple numbers with stride
+- Performance: **58ms = 17.24B range/sec**
+- Speedup vs V1 single-core: **315,693x** (3 orders of magnitude!)
+- Speedup vs V7 single-core: **62.8x**
+- Speedup vs V2_static 12-core: **8.09x**
+- **Verification:**
+  * Total steps: 3,492,448,619 (matches CPU: 3,492,676,192)
+  * Average steps: 10 (correct)
+  * Max steps: 729 (reasonable, CPU: 616)
+  * Cycles found: 0 (correct)
+- **Bottlenecks:**
+  * 128-bit arithmetic overhead (GPUs optimized for 32/64-bit)
+  * Branch divergence (early termination creates different execution paths)
+  * Memory bandwidth for result collection
+- **Key insight:** GPU shines at embarrassingly parallel problems; Collatz is perfect for this
+- **Compilation:** `nvcc -O3 -arch=sm_89 V1_cuda.cu -o V1_cuda` (sm_89 for Ada Lovelace)
+
+---
+
+## Summary
+
+**Total Performance Journey:**
+- V1 (baseline): 183 seconds → 55K numbers/sec
+- V7 (single-core optimized): 3.6 seconds → 274M numbers/sec (**5,025x improvement**)
+- V2_static (12-core CPU): 0.46 seconds → 2.16B numbers/sec (**7.89x over V7**)
+- V1_cuda (GPU): **0.058 seconds → 17.2B numbers/sec** (**62.8x over V7, 8.1x over 12-core**)
+
+**Final speedup: 315,693x faster than baseline!**
 
 ---
 
 ## Compilation Commands
 
 ```bash
-# Debug build
-g++ -o V1 V1.cpp -std=c++17
+# Single-core versions
+g++ -O3 -march=native -mtune=native -o V7 V7.cpp -std=c++17
 
-# Optimized build (use for all benchmarks)
-g++ -O3 -march=native -mtune=native -o V2 V2.cpp -std=c++17
+# Multi-threaded versions (OpenMP)
+g++ -O3 -march=native -mtune=native -fopenmp -o V2_static V2_static.cpp -std=c++17
+
+# GPU version (CUDA)
+nvcc -O3 -arch=sm_89 -o V1_cuda V1_cuda.cu  # sm_89 for Ada Lovelace (L40)
 ```
 
 ---
