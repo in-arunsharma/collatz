@@ -40,7 +40,7 @@ n ≡ 1 (mod 6)
              └─┘
           Ends with 10 (divisible by 2¹, not 2²)
 ```
-✅ **Result:** We divide by 2 exactly **once**, get an odd number → interesting!
+**Result:** We divide by 2 exactly **once**, get an odd number → interesting!
 
 ---
 
@@ -54,7 +54,7 @@ n ≡ 3 (mod 6)
              └──┘
           Ends with 00 (divisible by 2² = 4)
 ```
-❌ **Result:** We divide by 2 **at least twice** → We've done WASTED work!
+**Result:** We divide by 2 **at least twice** → We've done WASTED work!
 
 **Why wasted?** Because we could have just tested n/2 originally and saved computation.
 
@@ -70,7 +70,7 @@ n ≡ 5 (mod 6)
               └───┘
           Ends with 10 (divisible by 2¹, not 2²)
 ```
-✅ **Result:** We divide by 2 exactly **once**, get an odd number → interesting!
+**Result:** We divide by 2 exactly **once**, get an odd number → interesting!
 
 ---
 
@@ -128,7 +128,7 @@ Start with odd n
    v       v       v
  odd!   even!    odd!
    |       |       |
-   ✅      ❌      ✅
+               
  TEST    SKIP    TEST
 ```
 
@@ -201,11 +201,11 @@ Speedup: 1.5x
 
 ## Summary
 
-🎯 **Key Insight:** Numbers ≡ 3 (mod 6) always lead to at least 2 divisions by 2 after 3n+1, which means we're doing redundant work.
+**Key Insight:** Numbers ≡ 3 (mod 6) always lead to at least 2 divisions by 2 after 3n+1, which means we're doing redundant work.
 
-📊 **Practical Impact:** 
+**Practical Impact:** 
 - Skip 1/3 of odd numbers
 - 1.5x speedup with zero additional complexity
 - Pure algorithmic optimization - do less work smartly!
 
-💡 **Remember:** The best optimization is the work you **don't do**.
+**Remember:** The best optimization is the work you **don't do**.
